@@ -58,6 +58,9 @@ function SidebarPage({ store }) {
     if (!panel) return undefined
 
     let hideTimer = null
+    const removeRefreshListener = panel.onRefresh?.(() => {
+      store.refreshState()
+    })
     const show = () => {
       if (hideTimer) {
         window.clearTimeout(hideTimer)
@@ -75,29 +78,30 @@ function SidebarPage({ store }) {
 
     return () => {
       if (hideTimer) window.clearTimeout(hideTimer)
+      removeRefreshListener?.()
       window.removeEventListener('mouseenter', show)
       window.removeEventListener('mouseleave', hide)
     }
   }, [store])
 
   return (
-    <div className="min-h-screen bg-transparent p-3 text-slate-900">
-      <div className="h-[calc(100vh-1.5rem)] overflow-hidden rounded-l-2xl border border-white/70 bg-white/95 shadow-2xl shadow-slate-950/15 backdrop-blur">
+    <div className="min-h-screen bg-transparent p-2 text-slate-900">
+      <div className="h-[calc(100vh-1rem)] overflow-hidden rounded-l-2xl border border-white/70 bg-white/95 shadow-xl shadow-slate-950/15 backdrop-blur">
         <div className="flex h-full flex-col">
-          <header className="border-b border-slate-100 px-5 py-5">
-            <p className="text-sm font-medium text-red-500">{formatDate(today)}</p>
-            <div className="mt-2 flex items-end justify-between gap-3">
+          <header className="border-b border-slate-100 px-4 py-4">
+            <p className="text-xs font-medium text-red-500">{formatDate(today)}</p>
+            <div className="mt-1.5 flex items-end justify-between gap-3">
               <div>
-                <h1 className="text-2xl font-semibold tracking-normal text-slate-950">今日</h1>
-                <p className="mt-1 text-sm text-slate-400">今天要做的事</p>
+                <h1 className="text-xl font-semibold tracking-normal text-slate-950">今日</h1>
+                <p className="mt-0.5 text-xs text-slate-400">今天要做的事</p>
               </div>
-              <span className="rounded-full bg-slate-950 px-3 py-1 text-sm font-semibold text-white">
+              <span className="rounded-full bg-slate-950 px-2.5 py-1 text-xs font-semibold text-white">
                 {totalCount}
               </span>
             </div>
           </header>
 
-          <main className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
+          <main className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
             <SidebarSection
               title="新背"
               tasks={newTasks}

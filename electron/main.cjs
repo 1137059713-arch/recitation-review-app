@@ -7,15 +7,18 @@ const isDev = !app.isPackaged
 const appRoot = isDev ? app.getAppPath() : path.resolve(path.dirname(process.execPath), '..', '..')
 const dataDirectory = path.join(appRoot, 'data')
 const dataFilePath = path.join(dataDirectory, 'recitation-data.json')
-const SIDEBAR_WIDTH = 360
-const SIDEBAR_TRIGGER_WIDTH = 10
-const SIDEBAR_SCREEN_MARGIN = 14
-const SIDEBAR_ANIMATION_MS = 220
+const SIDEBAR_WIDTH = 280
+const SIDEBAR_HEIGHT = 460
+const SIDEBAR_EDGE_TRIGGER = 3
+const SIDEBAR_SCREEN_MARGIN = 10
+const SIDEBAR_ANIMATION_MS = 180
 
 let mainWindow = null
 let sidebarWindow = null
 let sidebarAnimation = null
 let sidebarIsShown = false
+let sidebarMouseMonitor = null
+let sidebarHideTimer = null
 
 const EMPTY_STATE = {
   items: [],
@@ -89,10 +92,10 @@ ipcMain.handle('recitation-storage:save', (_event, state) => writeRecitationStat
 function getSidebarBounds(isShown) {
   const { workArea } = screen.getPrimaryDisplay()
   const width = SIDEBAR_WIDTH
-  const height = Math.max(520, workArea.height - SIDEBAR_SCREEN_MARGIN * 2)
-  const y = workArea.y + SIDEBAR_SCREEN_MARGIN
+  const height = Math.min(SIDEBAR_HEIGHT, workArea.height - SIDEBAR_SCREEN_MARGIN * 2)
+  const y = workArea.y + Math.round((workArea.height - height) / 2)
   const shownX = workArea.x + workArea.width - width - SIDEBAR_SCREEN_MARGIN
-  const hiddenX = workArea.x + workArea.width - SIDEBAR_TRIGGER_WIDTH
+  const hiddenX = workArea.x + workArea.width - 1
 
   return {
     x: isShown ? shownX : hiddenX,
@@ -108,8 +111,13 @@ function easeOutCubic(value) {
 
 function animateSidebar(isShown) {
   if (!sidebarWindow || sidebarWindow.isDestroyed()) return
+  if (sidebarIsShown === isShown && !sidebarAnimation) return
 
   sidebarIsShown = isShown
+  if (isShown) {
+    sidebarWindow.setIgnoreMouseEvents(false)
+    sidebarWindow.webContents.send('sidebar-panel:refresh')
+  }
 
   if (sidebarAnimation) {
     clearInterval(sidebarAnimation)
@@ -140,8 +148,77 @@ function animateSidebar(isShown) {
       clearInterval(sidebarAnimation)
       sidebarAnimation = null
       sidebarWindow.setBounds(endBounds)
+      if (!isShown) {
+        sidebarWindow.setIgnoreMouseEvents(true, { forward: true })
+      }
     }
   }, 1000 / 60)
+}
+
+function isPointInsideBounds(point, bounds, padding = 0) {
+  return (
+    point.x >= bounds.x - padding &&
+    point.x <= bounds.x + bounds.width + padding &&
+    point.y >= bounds.y - padding &&
+    point.y <= bounds.y + bounds.height + padding
+  )
+}
+
+function startSidebarMouseMonitor() {
+  if (sidebarMouseMonitor) return
+
+  sidebarMouseMonitor = setInterval(() => {
+    if (!sidebarWindow || sidebarWindow.isDestroyed()) return
+
+    const point = screen.getCursorScreenPoint()
+    const { workArea } = screen.getPrimaryDisplay()
+    const isNearRightEdge =
+      point.x >= workArea.x + workArea.width - SIDEBAR_EDGE_TRIGGER &&
+      point.x <= workArea.x + workArea.width &&
+      point.y >= workArea.y &&
+      point.y <= workArea.y + workArea.height
+
+    if (isNearRightEdge) {
+      if (sidebarHideTimer) {
+        clearTimeout(sidebarHideTimer)
+        sidebarHideTimer = null
+      }
+      animateSidebar(true)
+      return
+    }
+
+    if (!sidebarIsShown) return
+
+    const shownBounds = getSidebarBounds(true)
+    const isInsideSidebar = isPointInsideBounds(point, shownBounds, 12)
+
+    if (isInsideSidebar) {
+      if (sidebarHideTimer) {
+        clearTimeout(sidebarHideTimer)
+        sidebarHideTimer = null
+      }
+      return
+    }
+
+    if (!sidebarHideTimer) {
+      sidebarHideTimer = setTimeout(() => {
+        sidebarHideTimer = null
+        animateSidebar(false)
+      }, 260)
+    }
+  }, 80)
+}
+
+function stopSidebarMouseMonitor() {
+  if (sidebarMouseMonitor) {
+    clearInterval(sidebarMouseMonitor)
+    sidebarMouseMonitor = null
+  }
+
+  if (sidebarHideTimer) {
+    clearTimeout(sidebarHideTimer)
+    sidebarHideTimer = null
+  }
 }
 
 function loadAppRoute(window, route = '/') {
@@ -208,6 +285,7 @@ function createSidebarWindow() {
 
   sidebarWindow.setAlwaysOnTop(true, 'floating')
   sidebarWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  sidebarWindow.setIgnoreMouseEvents(true, { forward: true })
   loadAppRoute(sidebarWindow, '/sidebar')
 
   sidebarWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -218,6 +296,8 @@ function createSidebarWindow() {
   sidebarWindow.on('closed', () => {
     sidebarWindow = null
   })
+
+  startSidebarMouseMonitor()
 }
 
 ipcMain.on('sidebar-panel:show', () => animateSidebar(true))
@@ -250,4 +330,5 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   app.isQuitting = true
+  stopSidebarMouseMonitor()
 })
