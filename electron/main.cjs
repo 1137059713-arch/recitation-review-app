@@ -11,6 +11,21 @@ const EMPTY_STATE = {
   items: [],
   tasks: [],
   groups: [],
+  scheduleSettings: {
+    restDays: [0],
+  },
+}
+
+function normalizeScheduleSettings(settings) {
+  const restDays = Array.isArray(settings?.restDays)
+    ? [...new Set(settings.restDays.map(Number))]
+        .filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)
+        .sort((a, b) => a - b)
+    : EMPTY_STATE.scheduleSettings.restDays
+
+  return {
+    restDays: [restDays[0] ?? EMPTY_STATE.scheduleSettings.restDays[0]],
+  }
 }
 
 function normalizeState(value) {
@@ -18,6 +33,7 @@ function normalizeState(value) {
     items: Array.isArray(value?.items) ? value.items : [],
     tasks: Array.isArray(value?.tasks) ? value.tasks : [],
     groups: Array.isArray(value?.groups) ? value.groups : [],
+    scheduleSettings: normalizeScheduleSettings(value?.scheduleSettings),
   }
 }
 

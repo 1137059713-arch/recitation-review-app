@@ -1,9 +1,12 @@
+import { DEFAULT_SCHEDULE_SETTINGS, normalizeScheduleSettings } from './schedule.js'
+
 const STORAGE_KEY = 'recitation-review-state-v1'
 
 const EMPTY_STATE = {
   items: [],
   tasks: [],
   groups: [],
+  scheduleSettings: DEFAULT_SCHEDULE_SETTINGS,
 }
 
 function getDesktopStorage() {
@@ -28,6 +31,7 @@ function normalizeState(value) {
           totalChapters: Number(group.totalChapters) > 0 ? Number(group.totalChapters) : 0,
         }))
       : [],
+    scheduleSettings: normalizeScheduleSettings(value?.scheduleSettings),
   }
 }
 

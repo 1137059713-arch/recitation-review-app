@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { rebalanceReviewSchedule } from '../utils/schedule.js'
+import { normalizeScheduleSettings, rebalanceReviewSchedule } from '../utils/schedule.js'
 import {
   isDesktopFileStorageAvailable,
   loadLocalState,
@@ -22,13 +22,20 @@ import {
   updateItemInState,
 } from '../utils/recitationActions.js'
 
+function rebalanceState(state) {
+  const scheduleSettings = normalizeScheduleSettings(state.scheduleSettings)
+
+  return {
+    ...state,
+    scheduleSettings,
+    tasks: rebalanceReviewSchedule(state.tasks, undefined, scheduleSettings),
+  }
+}
+
 export function useRecitationStore() {
   const [state, setState] = useState(() => {
     const loadedState = loadLocalState()
-    return {
-      ...loadedState,
-      tasks: rebalanceReviewSchedule(loadedState.tasks),
-    }
+    return rebalanceState(loadedState)
   })
   const [isReadyToSave, setIsReadyToSave] = useState(() => !isDesktopFileStorageAvailable())
 
@@ -38,10 +45,7 @@ export function useRecitationStore() {
     loadState().then(({ state: loadedState }) => {
       if (!isActive) return
 
-      setState({
-        ...loadedState,
-        tasks: rebalanceReviewSchedule(loadedState.tasks),
-      })
+      setState(rebalanceState(loadedState))
       setIsReadyToSave(true)
     })
 
@@ -69,64 +73,77 @@ export function useRecitationStore() {
     setState((current) => {
       const result = addGroupToState(current, name, options)
       createdGroupId = result.groupId
-      return result.state
+      return rebalanceState(result.state)
     })
 
     return createdGroupId
   }
 
   function addItem(payload) {
-    setState((current) => addItemToState(current, payload))
+    setState((current) => rebalanceState(addItemToState(current, payload)))
   }
 
   function updateItem(itemId, updates) {
-    setState((current) => updateItemInState(current, itemId, updates))
+    setState((current) => rebalanceState(updateItemInState(current, itemId, updates)))
   }
 
   function updateItemGroup(itemId, groupId) {
-    setState((current) => updateItemGroupInState(current, itemId, groupId))
+    setState((current) => rebalanceState(updateItemGroupInState(current, itemId, groupId)))
   }
 
   function deleteItem(itemId) {
-    setState((current) => deleteItemFromState(current, itemId))
+    setState((current) => rebalanceState(deleteItemFromState(current, itemId)))
   }
 
   function renameGroup(groupId, name) {
-    setState((current) => renameGroupInState(current, groupId, name))
+    setState((current) => rebalanceState(renameGroupInState(current, groupId, name)))
   }
 
   function updateGroupColor(groupId, color) {
-    setState((current) => updateGroupColorInState(current, groupId, color))
+    setState((current) => rebalanceState(updateGroupColorInState(current, groupId, color)))
   }
 
   function updateGroupProgress(groupId, updates) {
-    setState((current) => updateGroupProgressInState(current, groupId, updates))
+    setState((current) => rebalanceState(updateGroupProgressInState(current, groupId, updates)))
   }
 
   function toggleGroupPinned(groupId) {
-    setState((current) => toggleGroupPinnedInState(current, groupId))
+    setState((current) => rebalanceState(toggleGroupPinnedInState(current, groupId)))
   }
 
   function deleteGroup(groupId) {
-    setState((current) => deleteGroupFromState(current, groupId))
+    setState((current) => rebalanceState(deleteGroupFromState(current, groupId)))
   }
 
   function addCustomReviewTask(itemId, date) {
-    setState((current) => addCustomReviewTaskToState(current, itemId, date))
+    setState((current) => rebalanceState(addCustomReviewTaskToState(current, itemId, date)))
   }
 
   function deleteCustomReviewTask(taskId) {
-    setState((current) => deleteCustomReviewTaskFromState(current, taskId))
+    setState((current) => rebalanceState(deleteCustomReviewTaskFromState(current, taskId)))
   }
 
   function completeTask(taskId, recallScore = null) {
-    setState((current) => completeTaskInState(current, taskId, recallScore))
+    setState((current) => rebalanceState(completeTaskInState(current, taskId, recallScore)))
+  }
+
+  function updateScheduleSettings(updates) {
+    setState((current) =>
+      rebalanceState({
+        ...current,
+        scheduleSettings: {
+          ...current.scheduleSettings,
+          ...updates,
+        },
+      }),
+    )
   }
 
   return {
     items: state.items,
     tasks: state.tasks,
     groups: state.groups,
+    scheduleSettings: state.scheduleSettings,
     itemsById,
     groupsById,
     addGroup,
@@ -142,5 +159,6 @@ export function useRecitationStore() {
     addCustomReviewTask,
     deleteCustomReviewTask,
     completeTask,
+    updateScheduleSettings,
   }
 }

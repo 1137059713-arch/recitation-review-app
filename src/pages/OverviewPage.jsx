@@ -695,8 +695,8 @@ function OverviewItemCard({
                 <p className="mt-1 text-sm font-medium text-slate-950">
                   安排 {formatDate(getTaskScheduledDate(task))}
                 </p>
-                {task.type !== 'new' && getTaskScheduledDate(task) !== task.date && (
-                  <p className="mt-1 text-xs text-amber-700">原定 {formatDate(task.date)}</p>
+                {task.type !== 'new' && getTaskScheduledDate(task) > task.date && (
+                  <p className="mt-1 text-xs font-semibold text-amber-700">积压补排</p>
                 )}
                 <p className={task.status === 'done' ? 'mt-1 text-xs text-red-600' : 'mt-1 text-xs text-slate-400'}>
                   {task.status === 'done' ? '已完成' : '待完成'}
@@ -874,3 +874,4 @@ function OverviewPage({ store }) {
 }
 
 export default OverviewPage
+

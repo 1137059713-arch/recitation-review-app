@@ -23,7 +23,7 @@ function TaskCard({
   const [isFullTextOpen, setIsFullTextOpen] = useState(false)
   const scheduledDate = getTaskScheduledDate(task)
   const isFutureTask = scheduledDate > toDateKey()
-  const isRescheduled = task.type !== 'new' && scheduledDate !== task.date
+  const isBacklogTask = task.type !== 'new' && scheduledDate > task.date
   const needsMastery = task.type !== 'new' && task.status !== 'done'
   const masteryOption = getMasteryOption(task.recallScore)
   const canEditSource = task.type === 'new' && Boolean(item) && Boolean(onUpdateItem)
@@ -95,9 +95,9 @@ function TaskCard({
             {TASK_LABELS[task.type]}
           </span>
           <span className="text-xs text-slate-400">安排 {formatDate(scheduledDate)}</span>
-          {isRescheduled && (
+          {isBacklogTask && (
             <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700">
-              原定 {formatDate(task.date)}
+              积压补排
             </span>
           )}
           {task.status === 'done' && (
@@ -247,3 +247,4 @@ function TaskCard({
 }
 
 export default TaskCard
+

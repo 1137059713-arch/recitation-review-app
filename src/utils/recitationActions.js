@@ -83,6 +83,7 @@ export function addItemToState(
   const nextTasks = [...createInitialTasks(item.id, createdAt), ...current.tasks]
 
   return {
+    ...current,
     groups: newGroup ? [...current.groups, newGroup] : current.groups,
     items: [item, ...current.items],
     tasks: rebalanceReviewSchedule(nextTasks),
