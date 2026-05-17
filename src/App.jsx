@@ -3,7 +3,9 @@ import HomePage from './pages/HomePage.jsx'
 import OverviewPage from './pages/OverviewPage.jsx'
 import CalendarPage from './pages/CalendarPage.jsx'
 import OverduePage from './pages/OverduePage.jsx'
+import SidebarPage from './pages/SidebarPage.jsx'
 import { useRecitationStore } from './hooks/useRecitationStore.js'
+import { useLocation } from 'react-router-dom'
 
 const navItems = [
   { to: '/', label: '今日任务' },
@@ -14,6 +16,11 @@ const navItems = [
 
 function App() {
   const store = useRecitationStore()
+  const location = useLocation()
+
+  if (location.pathname === '/sidebar') {
+    return <SidebarPage store={store} />
+  }
 
   return (
     <div className="min-h-screen bg-[#f5f7fb] text-slate-900">

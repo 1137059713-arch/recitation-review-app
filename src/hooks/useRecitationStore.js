@@ -54,6 +54,11 @@ export function useRecitationStore() {
     }
   }, [])
 
+  async function refreshState() {
+    const { state: loadedState } = await loadState()
+    setState(rebalanceState(loadedState))
+  }
+
   useEffect(() => {
     if (!isReadyToSave) return
     saveState(state)
@@ -146,6 +151,7 @@ export function useRecitationStore() {
     scheduleSettings: state.scheduleSettings,
     itemsById,
     groupsById,
+    refreshState,
     addGroup,
     addItem,
     updateItem,
