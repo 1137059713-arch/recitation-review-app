@@ -1,42 +1,8 @@
 import AddItemForm from '../components/AddItemForm.jsx'
+import ScheduleSettingsPanel from '../components/ScheduleSettingsPanel.jsx'
 import TaskSection from '../components/TaskSection.jsx'
-import { WEEKDAY_LABELS, getTaskScheduledDate } from '../utils/schedule.js'
+import { getTaskScheduledDate } from '../utils/schedule.js'
 import { formatDate, toDateKey } from '../utils/date.js'
-
-function ScheduleSettings({ settings, onUpdate }) {
-  const restDays = settings?.restDays || [0]
-  const restDay = restDays[0] ?? 0
-
-  function handleRestDayChange(event) {
-    onUpdate({
-      restDays: [Number(event.target.value)],
-    })
-  }
-
-  return (
-    <section className="mt-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-      <div>
-        <p className="text-sm font-medium text-red-500">排程设置</p>
-        <h3 className="mt-1 text-base font-semibold text-slate-950">休息日</h3>
-      </div>
-
-      <label className="mt-4 block">
-        <span className="text-sm font-semibold text-slate-700">每周休息</span>
-        <select
-          value={restDay}
-          onChange={handleRestDayChange}
-          className="mt-2 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-slate-950 outline-none transition focus:border-red-300 focus:bg-white focus:ring-4 focus:ring-red-100"
-        >
-          {WEEKDAY_LABELS.map((label, day) => (
-            <option key={day} value={day}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </label>
-    </section>
-  )
-}
 
 function HomePage({ store }) {
   const today = toDateKey()
@@ -99,8 +65,17 @@ function HomePage({ store }) {
       </div>
 
       <aside>
-        <AddItemForm groups={store.groups} items={store.items} onAdd={store.addItem} />
-        <ScheduleSettings settings={store.scheduleSettings} onUpdate={store.updateScheduleSettings} />
+        <AddItemForm
+          groups={store.groups}
+          items={store.items}
+          headerExtra={
+            <ScheduleSettingsPanel
+              settings={store.scheduleSettings}
+              onUpdate={store.updateScheduleSettings}
+            />
+          }
+          onAdd={store.addItem}
+        />
       </aside>
     </div>
   )

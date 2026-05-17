@@ -3,7 +3,12 @@ import { getChapterOptions, sortGroups } from '../utils/groups.js'
 
 const NEW_GROUP_VALUE = '__new_group__'
 
-function AddItemForm({ groups = [], items = [], onAdd }) {
+function AddItemForm({
+  groups = [],
+  items = [],
+  headerExtra = null,
+  onAdd,
+}) {
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [groupChoice, setGroupChoice] = useState('')
@@ -78,6 +83,8 @@ function AddItemForm({ groups = [], items = [], onAdd }) {
         <p className="text-sm font-medium text-red-500">添加今日背诵</p>
         <h2 className="mt-1 text-xl font-semibold text-slate-950">记录刚背完的内容</h2>
       </div>
+
+      {headerExtra && <div className="mb-5">{headerExtra}</div>}
 
       <div className="space-y-4">
         <label className="block">
