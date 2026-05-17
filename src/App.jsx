@@ -11,7 +11,7 @@ const navItems = [
   { to: '/', label: '今日任务' },
   { to: '/overdue', label: '逾期任务' },
   { to: '/overview', label: '全部总览' },
-  { to: '/calendar', label: '日期列表' },
+  { to: '/calendar', label: '背诵日程' },
 ]
 
 function App() {
