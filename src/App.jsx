@@ -9,17 +9,82 @@ import { addDays, toDateKey } from './utils/date.js'
 import { getReviewTaskLoad, getTaskScheduledDate } from './utils/schedule.js'
 
 const primaryNavItems = [
-  { to: '/', label: '今日任务', icon: '□' },
-  { to: '/overdue', label: '逾期任务', icon: '◷' },
-  { to: '/overview', label: '全部总览', icon: '▦' },
-  { to: '/calendar', label: '背诵日程', icon: '▣' },
+  { to: '/', label: '今日任务', icon: 'today' },
+  { to: '/overdue', label: '逾期任务', icon: 'clock' },
+  { to: '/overview', label: '全部总览', icon: 'grid' },
+  { to: '/calendar', label: '背诵日程', icon: 'calendar' },
 ]
 
 const sideNavItems = [
-  { to: '/calendar', label: '背诵日程', icon: '▣' },
-  { to: '/overview', label: '书籍章节', icon: '▤' },
-  { to: '/overdue', label: '薄弱章节', icon: '▱' },
+  { to: '/calendar', label: '背诵日程', icon: 'calendar' },
+  { to: '/overview', label: '书籍章节', icon: 'book' },
+  { to: '/overdue', label: '薄弱章节', icon: 'weak' },
 ]
+
+function AppIcon({ name, className = '' }) {
+  const baseClass = ['h-4 w-4', className].join(' ')
+
+  if (name === 'today') {
+    return (
+      <span className={baseClass}>
+        <span className="block h-full w-full rounded-[4px] border-2 border-current">
+          <span className="mx-auto mt-1 block h-1.5 w-1.5 rounded-sm bg-current" />
+        </span>
+      </span>
+    )
+  }
+
+  if (name === 'clock') {
+    return (
+      <span className={baseClass}>
+        <span className="relative block h-full w-full rounded-full border-2 border-current">
+          <span className="absolute left-1/2 top-1/2 h-1.5 w-px -translate-x-1/2 -translate-y-full bg-current" />
+          <span className="absolute left-1/2 top-1/2 h-px w-1.5 -translate-y-1/2 bg-current" />
+        </span>
+      </span>
+    )
+  }
+
+  if (name === 'grid') {
+    return (
+      <span className={`${baseClass} grid grid-cols-2 gap-0.5`}>
+        <span className="rounded-[3px] border border-current" />
+        <span className="rounded-[3px] border border-current" />
+        <span className="rounded-[3px] border border-current" />
+        <span className="rounded-[3px] border border-current" />
+      </span>
+    )
+  }
+
+  if (name === 'book') {
+    return (
+      <span className={baseClass}>
+        <span className="block h-full w-full rounded-[4px] border-2 border-current">
+          <span className="mx-1 mt-1 block h-px bg-current" />
+          <span className="mx-1 mt-1 block h-px bg-current" />
+        </span>
+      </span>
+    )
+  }
+
+  if (name === 'weak') {
+    return (
+      <span className={baseClass}>
+        <span className="block h-full w-full rounded-[4px] border-2 border-current">
+          <span className="mx-1 mt-1.5 block h-px rotate-[-18deg] bg-current" />
+        </span>
+      </span>
+    )
+  }
+
+  return (
+    <span className={baseClass}>
+      <span className="block h-full w-full rounded-[4px] border-2 border-current">
+        <span className="mx-auto mt-1 block h-1.5 w-1.5 rounded-sm bg-current" />
+      </span>
+    </span>
+  )
+}
 
 function getWeekSummary(tasks) {
   const today = toDateKey()
@@ -53,7 +118,7 @@ function TopNavItem({ item }) {
     >
       {({ isActive }) => (
         <>
-          <span className={isActive ? 'text-red-500' : 'text-slate-400'}>{item.icon}</span>
+          <AppIcon name={item.icon} className={isActive ? 'text-red-500' : 'text-slate-400'} />
           <span>{item.label}</span>
           {isActive && <span className="absolute inset-x-4 bottom-0 h-0.5 rounded-full bg-red-500" />}
         </>
@@ -77,7 +142,7 @@ function SideNavItem({ item }) {
     >
       {({ isActive }) => (
         <>
-          <span className={isActive ? 'text-red-500' : 'text-slate-400'}>{item.icon}</span>
+          <AppIcon name={item.icon} className={isActive ? 'text-red-500' : 'text-slate-400'} />
           <span>{item.label}</span>
         </>
       )}
@@ -87,10 +152,10 @@ function SideNavItem({ item }) {
 
 function WeekSummaryCard({ summary }) {
   const rows = [
-    { label: '新背', value: summary.newCount, color: 'text-blue-600', icon: '▥' },
-    { label: '复习', value: summary.reviewCount, color: 'text-violet-600', icon: '↻' },
-    { label: '积压补排', value: summary.backlogCount, color: 'text-amber-600', icon: '◷' },
-    { label: '预计总负载', value: summary.load.toFixed(1), color: 'text-sky-600', icon: '▥' },
+    { label: '新背', value: summary.newCount, color: 'text-blue-600', icon: 'book' },
+    { label: '复习', value: summary.reviewCount, color: 'text-violet-600', icon: 'clock' },
+    { label: '积压补排', value: summary.backlogCount, color: 'text-amber-600', icon: 'weak' },
+    { label: '预计总负载', value: summary.load.toFixed(1), color: 'text-sky-600', icon: 'grid' },
   ]
 
   return (
@@ -104,7 +169,7 @@ function WeekSummaryCard({ summary }) {
         {rows.map((row) => (
           <div key={row.label} className="flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-2">
-              <span className={row.color}>{row.icon}</span>
+              <AppIcon name={row.icon} className={row.color} />
               <span className="text-sm font-medium text-slate-500">{row.label}</span>
             </div>
             <span className="text-lg font-semibold text-slate-950">{row.value}</span>
@@ -124,7 +189,7 @@ function AppShell({ store }) {
         <div className="flex h-full items-center">
           <div className="flex w-60 shrink-0 items-center gap-3 border-r border-slate-200/70 px-5">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-50 text-red-500">
-              ▣
+              <AppIcon name="calendar" />
             </div>
             <div className="min-w-0">
               <h1 className="truncate text-sm font-semibold text-slate-950">背诵复习管理</h1>
@@ -132,24 +197,13 @@ function AppShell({ store }) {
             </div>
           </div>
 
-          <nav className="flex h-full min-w-0 flex-1 justify-center">
+          <div className="min-w-0 flex-1" />
+
+          <nav className="flex h-full shrink-0 justify-end pr-5">
             {primaryNavItems.map((item) => (
               <TopNavItem key={item.to} item={item} />
             ))}
           </nav>
-
-          <div className="flex w-56 shrink-0 items-center justify-end gap-2 px-5 text-slate-500">
-            <button className="flex h-9 w-9 items-center justify-center rounded-lg transition hover:bg-slate-100 hover:text-slate-900" type="button">
-              ☼
-            </button>
-            <button className="flex h-9 w-9 items-center justify-center rounded-lg transition hover:bg-slate-100 hover:text-slate-900" type="button">
-              ⚙
-            </button>
-            <span className="mx-1 h-5 w-px bg-slate-200" />
-            <span className="text-lg leading-none text-slate-400">−</span>
-            <span className="text-sm text-slate-400">□</span>
-            <span className="text-lg leading-none text-slate-400">×</span>
-          </div>
         </div>
       </header>
 
