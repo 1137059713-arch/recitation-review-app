@@ -26,8 +26,14 @@ const EMPTY_STATE = {
   groups: [],
   scheduleSettings: {
     restDays: [0],
+    dailyReviewLimit: 3,
+    reviewLoadLevel: 'standard',
+    backlogStrategy: 'balanced',
   },
 }
+
+const REVIEW_LOAD_LEVELS = new Set(['light', 'standard', 'strong'])
+const BACKLOG_STRATEGIES = new Set(['conservative', 'balanced', 'aggressive'])
 
 function normalizeScheduleSettings(settings) {
   const restDays = Array.isArray(settings?.restDays)
@@ -38,6 +44,15 @@ function normalizeScheduleSettings(settings) {
 
   return {
     restDays: [restDays[0] ?? EMPTY_STATE.scheduleSettings.restDays[0]],
+    dailyReviewLimit: [2, 3, 4].includes(Number(settings?.dailyReviewLimit))
+      ? Number(settings.dailyReviewLimit)
+      : EMPTY_STATE.scheduleSettings.dailyReviewLimit,
+    reviewLoadLevel: REVIEW_LOAD_LEVELS.has(settings?.reviewLoadLevel)
+      ? settings.reviewLoadLevel
+      : EMPTY_STATE.scheduleSettings.reviewLoadLevel,
+    backlogStrategy: BACKLOG_STRATEGIES.has(settings?.backlogStrategy)
+      ? settings.backlogStrategy
+      : EMPTY_STATE.scheduleSettings.backlogStrategy,
   }
 }
 

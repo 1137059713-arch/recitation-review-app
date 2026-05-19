@@ -20,6 +20,8 @@ import {
   updateGroupProgressInState,
   updateItemGroupInState,
   updateItemInState,
+  pullNextBacklogReviewToTodayInState,
+  scheduleReviewTaskTodayInState,
 } from '../utils/recitationActions.js'
 
 function rebalanceState(state) {
@@ -128,6 +130,14 @@ export function useRecitationStore() {
     setState((current) => rebalanceState(deleteCustomReviewTaskFromState(current, taskId)))
   }
 
+  function pullNextBacklogReviewToToday() {
+    setState((current) => rebalanceState(pullNextBacklogReviewToTodayInState(current)))
+  }
+
+  function scheduleReviewTaskToday(taskId) {
+    setState((current) => rebalanceState(scheduleReviewTaskTodayInState(current, taskId)))
+  }
+
   function completeTask(taskId, recallScore = null) {
     setState((current) => rebalanceState(completeTaskInState(current, taskId, recallScore)))
   }
@@ -164,6 +174,8 @@ export function useRecitationStore() {
     deleteGroup,
     addCustomReviewTask,
     deleteCustomReviewTask,
+    pullNextBacklogReviewToToday,
+    scheduleReviewTaskToday,
     completeTask,
     updateScheduleSettings,
   }

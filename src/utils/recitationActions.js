@@ -1,6 +1,14 @@
-import { createInitialTasks, createTask, getTaskScheduledDate, rebalanceReviewSchedule } from './schedule.js'
+import {
+  createInitialTasks,
+  createTask,
+  getBacklogReviewTasksByPriority,
+  getTaskScheduledDate,
+  isReviewTask,
+  rebalanceReviewSchedule,
+} from './schedule.js'
 import { toDateKey } from './date.js'
 import { DEFAULT_GROUP_COLOR } from './groups.js'
+import { DEFAULT_ESTIMATED_DIFFICULTY, normalizeEstimatedDifficulty } from './difficulty.js'
 
 export function createId() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -61,6 +69,7 @@ export function addItemToState(
     newGroupName = '',
     newGroupProgressEnabled = false,
     newGroupTotalChapters = 0,
+    estimatedDifficulty = DEFAULT_ESTIMATED_DIFFICULTY,
   },
 ) {
   const createdAt = toDateKey()
@@ -79,8 +88,12 @@ export function addItemToState(
     body: body.trim(),
     createdAt,
     groupId: newGroup ? newGroup.id : groupId || null,
+    estimatedDifficulty: normalizeEstimatedDifficulty(estimatedDifficulty),
   }
-  const nextTasks = [...createInitialTasks(item.id, createdAt), ...current.tasks]
+  const nextTasks = [
+    ...createInitialTasks(item.id, createdAt, item.estimatedDifficulty),
+    ...current.tasks,
+  ]
 
   return {
     ...current,
@@ -228,6 +241,57 @@ export function deleteCustomReviewTaskFromState(current, taskId) {
     ...current,
     tasks: rebalanceReviewSchedule(
       current.tasks.filter((task) => !(task.id === taskId && task.type === 'custom-review')),
+    ),
+  }
+}
+
+export function pullNextBacklogReviewToTodayInState(current) {
+  const today = toDateKey()
+  const [nextTask] = getBacklogReviewTasksByPriority(current.tasks, today)
+
+  if (!nextTask) return current
+
+  return {
+    ...current,
+    tasks: rebalanceReviewSchedule(
+      current.tasks.map((task) =>
+        task.id === nextTask.id ||
+        (task.status !== 'done' && isReviewTask(task) && getTaskScheduledDate(task) === today)
+          ? {
+              ...task,
+              scheduledDate: today,
+              manualScheduledDate: today,
+            }
+          : task,
+      ),
+      today,
+      current.scheduleSettings,
+    ),
+  }
+}
+
+export function scheduleReviewTaskTodayInState(current, taskId) {
+  const today = toDateKey()
+  const targetTask = current.tasks.find((task) => task.id === taskId)
+
+  if (!targetTask || targetTask.status === 'done' || !isReviewTask(targetTask)) return current
+  if (getTaskScheduledDate(targetTask) === today) return current
+
+  return {
+    ...current,
+    tasks: rebalanceReviewSchedule(
+      current.tasks.map((task) =>
+        task.id === taskId ||
+        (task.status !== 'done' && isReviewTask(task) && getTaskScheduledDate(task) === today)
+          ? {
+              ...task,
+              scheduledDate: today,
+              manualScheduledDate: today,
+            }
+          : task,
+      ),
+      today,
+      current.scheduleSettings,
     ),
   }
 }

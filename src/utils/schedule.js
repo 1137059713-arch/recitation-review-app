@@ -1,8 +1,22 @@
 import { addDays, compareDateKey, toDateKey } from './date.js'
+import { DEFAULT_ESTIMATED_DIFFICULTY, getEstimatedDifficultyLoad, normalizeEstimatedDifficulty } from './difficulty.js'
 
 export const WEEKDAY_LABELS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+export const REVIEW_LOAD_LEVELS = {
+  light: { label: '轻松', load: 2.2, description: '复习压力更低，适合忙碌日。' },
+  standard: { label: '标准', load: 3.0, description: '默认节奏，复习和休息比较均衡。' },
+  strong: { label: '加强', load: 4.0, description: '更积极消化任务，适合状态好的阶段。' },
+}
+export const BACKLOG_STRATEGIES = {
+  conservative: { label: '保守', description: '每天最多自动补 1 条逾期任务。' },
+  balanced: { label: '均衡', description: '按当天余量自动补排，避免压力突然变大。' },
+  aggressive: { label: '积极', description: '有复习空位就优先补逾期任务。' },
+}
 export const DEFAULT_SCHEDULE_SETTINGS = {
   restDays: [0],
+  dailyReviewLimit: 3,
+  reviewLoadLevel: 'standard',
+  backlogStrategy: 'balanced',
 }
 
 export const REVIEW_STEPS = [
@@ -22,10 +36,14 @@ export const TASK_LABELS = {
   'custom-review': '自定义复习',
 }
 
-export const DAILY_REVIEW_LIMIT = 3
-export const DAILY_TARGET_REVIEW_LOAD = 3
-export const DAILY_MAX_REVIEW_LOAD = 3.5
-export const DAILY_MAX_REVIEW_TASKS = 4
+export const DAILY_TARGET_STUDY_LOAD = 3
+export const DAILY_MAX_STUDY_LOAD = 4
+export const DAILY_MAX_STUDY_TASKS = 4
+
+export const DAILY_REVIEW_LIMIT = DAILY_TARGET_STUDY_LOAD
+export const DAILY_TARGET_REVIEW_LOAD = DAILY_TARGET_STUDY_LOAD
+export const DAILY_MAX_REVIEW_LOAD = DAILY_TARGET_STUDY_LOAD
+export const DAILY_MAX_REVIEW_TASKS = 3
 
 const REVIEW_LOAD_BY_SCORE = {
   20: 1.4,
@@ -44,7 +62,7 @@ const REVIEW_RULES = {
 }
 
 export function getTaskScheduledDate(task) {
-  return task.scheduledDate || task.date
+  return task.manualScheduledDate || task.scheduledDate || task.date
 }
 
 export function normalizeScheduleSettings(settings = {}) {
@@ -54,8 +72,40 @@ export function normalizeScheduleSettings(settings = {}) {
         .sort((a, b) => a - b)
     : DEFAULT_SCHEDULE_SETTINGS.restDays
 
+  const dailyReviewLimit = Number(settings?.dailyReviewLimit)
+  const reviewLoadLevel = REVIEW_LOAD_LEVELS[settings?.reviewLoadLevel]
+    ? settings.reviewLoadLevel
+    : DEFAULT_SCHEDULE_SETTINGS.reviewLoadLevel
+  const backlogStrategy = BACKLOG_STRATEGIES[settings?.backlogStrategy]
+    ? settings.backlogStrategy
+    : DEFAULT_SCHEDULE_SETTINGS.backlogStrategy
+
   return {
     restDays: [restDays[0] ?? DEFAULT_SCHEDULE_SETTINGS.restDays[0]],
+    dailyReviewLimit: [2, 3, 4].includes(dailyReviewLimit)
+      ? dailyReviewLimit
+      : DEFAULT_SCHEDULE_SETTINGS.dailyReviewLimit,
+    reviewLoadLevel,
+    backlogStrategy,
+  }
+}
+
+export function getScheduleCapacity(rawSettings = DEFAULT_SCHEDULE_SETTINGS) {
+  const settings = normalizeScheduleSettings(rawSettings)
+  const maxReviewTasks = settings.dailyReviewLimit
+  const maxReviewLoad = REVIEW_LOAD_LEVELS[settings.reviewLoadLevel].load
+  const maxBacklogPerDay = {
+    conservative: 1,
+    balanced: maxReviewTasks,
+    aggressive: maxReviewTasks,
+  }[settings.backlogStrategy]
+
+  return {
+    maxReviewTasks,
+    maxReviewLoad,
+    maxStudyTasks: Math.max(DAILY_MAX_STUDY_TASKS, maxReviewTasks + 1),
+    maxStudyLoad: Math.max(DAILY_MAX_STUDY_LOAD, maxReviewLoad),
+    maxBacklogPerDay,
   }
 }
 
@@ -72,7 +122,7 @@ export function isReviewTask(task) {
   return task.type !== 'new'
 }
 
-export function createTask({ itemId, type, date }) {
+export function createTask({ itemId, type, date, estimatedDifficulty = DEFAULT_ESTIMATED_DIFFICULTY }) {
   return {
     id: type === 'custom-review' ? `${itemId}-${type}-${date}` : `${itemId}-${type}`,
     itemId,
@@ -81,12 +131,15 @@ export function createTask({ itemId, type, date }) {
     scheduledDate: date,
     status: 'pending',
     recallScore: null,
+    ...(type === 'new'
+      ? { estimatedDifficulty: normalizeEstimatedDifficulty(estimatedDifficulty) }
+      : {}),
   }
 }
 
-export function createInitialTasks(itemId, createdAt) {
+export function createInitialTasks(itemId, createdAt, estimatedDifficulty = DEFAULT_ESTIMATED_DIFFICULTY) {
   return [
-    createTask({ itemId, type: 'new', date: createdAt }),
+    createTask({ itemId, type: 'new', date: createdAt, estimatedDifficulty }),
     ...REVIEW_STEPS.map((step) =>
       createTask({
         itemId,
@@ -134,16 +187,24 @@ export function getReviewTaskLoad(task, tasks = []) {
   return REVIEW_LOAD_BY_SCORE[score] || 1
 }
 
+export function getNewTaskLoad(task) {
+  return getEstimatedDifficultyLoad(task.estimatedDifficulty)
+}
+
 function getReviewStats(tasks, allTasks) {
   return tasks.reduce((stats, task) => {
-    if (isReviewTask(task)) {
-      const date = getTaskScheduledDate(task)
-      const current = stats.get(date) || { load: 0, count: 0 }
-      stats.set(date, {
-        load: current.load + getReviewTaskLoad(task, allTasks),
-        count: current.count + 1,
-      })
-    }
+    if (!isReviewTask(task)) return stats
+
+    const date = getTaskScheduledDate(task)
+    const current = stats.get(date) || { load: 0, count: 0, backlogCount: 0, normalCount: 0 }
+    const isBacklog = compareDateKey(task.date, date) < 0
+
+    stats.set(date, {
+      load: current.load + getReviewTaskLoad(task, allTasks),
+      count: current.count + 1,
+      backlogCount: current.backlogCount + (isBacklog ? 1 : 0),
+      normalCount: current.normalCount + (isBacklog ? 0 : 1),
+    })
 
     return stats
   }, new Map())
@@ -152,21 +213,29 @@ function getReviewStats(tasks, allTasks) {
 function canPlaceTaskOnDate({ date, taskLoad, statsByDate, settings, isBacklog }) {
   if (isRestDay(date, settings)) return false
 
-  const stats = statsByDate.get(date) || { load: 0, count: 0 }
+  const capacity = getScheduleCapacity(settings)
+  const stats = statsByDate.get(date) || { load: 0, count: 0, backlogCount: 0, normalCount: 0 }
   const nextLoad = stats.load + taskLoad
   const nextCount = stats.count + 1
+  const nextBacklogCount = stats.backlogCount + (isBacklog ? 1 : 0)
+  const backlogLimit = settings.backlogStrategy === 'balanced' && stats.normalCount > 0
+    ? 1
+    : capacity.maxBacklogPerDay
 
-  if (nextLoad > DAILY_MAX_REVIEW_LOAD) return false
-  if (nextCount > DAILY_MAX_REVIEW_TASKS) return false
+  if (nextLoad > capacity.maxReviewLoad) return false
+  if (nextCount > capacity.maxReviewTasks) return false
+  if (isBacklog && nextBacklogCount > backlogLimit) return false
 
-  return !isBacklog || stats.load < DAILY_TARGET_REVIEW_LOAD
+  return true
 }
 
-function addTaskStats(date, taskLoad, statsByDate) {
-  const stats = statsByDate.get(date) || { load: 0, count: 0 }
+function addTaskStats(date, taskLoad, statsByDate, isBacklog) {
+  const stats = statsByDate.get(date) || { load: 0, count: 0, backlogCount: 0, normalCount: 0 }
   statsByDate.set(date, {
     load: stats.load + taskLoad,
     count: stats.count + 1,
+    backlogCount: stats.backlogCount + (isBacklog ? 1 : 0),
+    normalCount: stats.normalCount + (isBacklog ? 0 : 1),
   })
 }
 
@@ -186,6 +255,55 @@ function findAvailableDate({ startDate, taskLoad, statsByDate, settings, isBackl
   return startDate
 }
 
+function getDateDistanceInDays(fromDate, toDate) {
+  const [fromYear, fromMonth, fromDay] = fromDate.split('-').map(Number)
+  const [toYear, toMonth, toDay] = toDate.split('-').map(Number)
+  const from = Date.UTC(fromYear, fromMonth - 1, fromDay)
+  const to = Date.UTC(toYear, toMonth - 1, toDay)
+
+  return Math.max(0, Math.round((to - from) / 86400000))
+}
+
+function compareBacklogTasks(a, b, allTasks, today) {
+  const overdueCompare = getDateDistanceInDays(b.date, today) - getDateDistanceInDays(a.date, today)
+  if (overdueCompare !== 0) return overdueCompare
+
+  const ruleA = getRule(a)
+  const ruleB = getRule(b)
+  const priorityCompare = ruleA.priority - ruleB.priority
+  if (priorityCompare !== 0) return priorityCompare
+
+  const loadCompare = getReviewTaskLoad(b, allTasks) - getReviewTaskLoad(a, allTasks)
+  if (loadCompare !== 0) return loadCompare
+
+  return compareDateKey(a.date, b.date) || a.id.localeCompare(b.id)
+}
+
+export function getOverdueReviewTasksByPriority(
+  tasks,
+  today = toDateKey(),
+  { excludeScheduledToday = false } = {},
+) {
+  const normalizedTasks = tasks.map((task) => ({
+    ...task,
+    scheduledDate: getTaskScheduledDate(task),
+  }))
+
+  return normalizedTasks
+    .filter(
+      (task) =>
+        task.status !== 'done' &&
+        isReviewTask(task) &&
+        compareDateKey(task.date, today) < 0 &&
+        (!excludeScheduledToday || getTaskScheduledDate(task) !== today),
+    )
+    .sort((a, b) => compareBacklogTasks(a, b, normalizedTasks, today))
+}
+
+export function getBacklogReviewTasksByPriority(tasks, today = toDateKey()) {
+  return getOverdueReviewTasksByPriority(tasks, today, { excludeScheduledToday: true })
+}
+
 export function rebalanceReviewSchedule(tasks, today = toDateKey(), rawSettings = DEFAULT_SCHEDULE_SETTINGS) {
   const settings = normalizeScheduleSettings(rawSettings)
   const normalizedTasks = tasks.map((task) => ({
@@ -193,8 +311,12 @@ export function rebalanceReviewSchedule(tasks, today = toDateKey(), rawSettings 
     scheduledDate: getTaskScheduledDate(task),
   }))
 
-  const fixedTasks = normalizedTasks.filter((task) => task.status === 'done' || !isReviewTask(task))
-  const pendingReviewTasks = normalizedTasks.filter((task) => task.status !== 'done' && isReviewTask(task))
+  const fixedTasks = normalizedTasks.filter(
+    (task) => task.status === 'done' || !isReviewTask(task) || task.manualScheduledDate,
+  )
+  const pendingReviewTasks = normalizedTasks.filter(
+    (task) => task.status !== 'done' && isReviewTask(task) && !task.manualScheduledDate,
+  )
   const normalReviewTasks = pendingReviewTasks
     .filter((task) => compareDateKey(task.date, today) >= 0)
     .sort((a, b) => {
@@ -208,18 +330,7 @@ export function rebalanceReviewSchedule(tasks, today = toDateKey(), rawSettings 
     })
   const backlogReviewTasks = pendingReviewTasks
     .filter((task) => compareDateKey(task.date, today) < 0)
-    .sort((a, b) => {
-      const loadCompare = getReviewTaskLoad(b, normalizedTasks) - getReviewTaskLoad(a, normalizedTasks)
-      if (loadCompare !== 0) return loadCompare
-
-      const ruleA = getRule(a)
-      const ruleB = getRule(b)
-      return (
-        compareDateKey(a.date, b.date) ||
-        ruleA.priority - ruleB.priority ||
-        a.id.localeCompare(b.id)
-      )
-    })
+    .sort((a, b) => compareBacklogTasks(a, b, normalizedTasks, today))
 
   const statsByDate = getReviewStats(fixedTasks, normalizedTasks)
 
@@ -228,7 +339,7 @@ export function rebalanceReviewSchedule(tasks, today = toDateKey(), rawSettings 
     const taskLoad = getReviewTaskLoad(task, normalizedTasks)
     const scheduledDate = findAvailableDate({ startDate, taskLoad, statsByDate, settings, isBacklog })
 
-    addTaskStats(scheduledDate, taskLoad, statsByDate)
+    addTaskStats(scheduledDate, taskLoad, statsByDate, isBacklog)
 
     return {
       ...task,

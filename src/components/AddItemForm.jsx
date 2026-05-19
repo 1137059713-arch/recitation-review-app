@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { ESTIMATED_DIFFICULTY_OPTIONS, DEFAULT_ESTIMATED_DIFFICULTY } from '../utils/difficulty.js'
 import { getChapterOptions, sortGroups } from '../utils/groups.js'
 
 const NEW_GROUP_VALUE = '__new_group__'
@@ -15,6 +16,7 @@ function AddItemForm({
   const [newGroupName, setNewGroupName] = useState('')
   const [newGroupProgressEnabled, setNewGroupProgressEnabled] = useState(false)
   const [newGroupTotalChapters, setNewGroupTotalChapters] = useState('')
+  const [estimatedDifficulty, setEstimatedDifficulty] = useState(DEFAULT_ESTIMATED_DIFFICULTY)
   const [error, setError] = useState('')
   const sortedGroups = sortGroups(groups)
   const selectedGroup = sortedGroups.find((group) => group.id === groupChoice)
@@ -67,6 +69,7 @@ function AddItemForm({
       newGroupName: isCreatingGroup ? newGroupName : '',
       newGroupProgressEnabled,
       newGroupTotalChapters,
+      estimatedDifficulty,
     })
     setTitle('')
     setBody('')
@@ -74,6 +77,7 @@ function AddItemForm({
     setNewGroupName('')
     setNewGroupProgressEnabled(false)
     setNewGroupTotalChapters('')
+    setEstimatedDifficulty(DEFAULT_ESTIMATED_DIFFICULTY)
     setError('')
   }
 
@@ -197,13 +201,35 @@ function AddItemForm({
           />
         </label>
 
+        <div>
+          <span className="text-sm font-medium text-slate-700">预计难度</span>
+          <div className="mt-2 grid grid-cols-4 gap-2">
+            {ESTIMATED_DIFFICULTY_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setEstimatedDifficulty(option.value)}
+                className={[
+                  'rounded-lg border px-3 py-2 text-sm font-semibold transition',
+                  estimatedDifficulty === option.value
+                    ? 'border-red-300 bg-red-50 text-red-700'
+                    : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-white',
+                ].join(' ')}
+                title={`预计负载 ${option.load}`}
+              >
+                {option.value} {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {error && <p className="text-sm font-medium text-red-600">{error}</p>}
 
         <button
           type="submit"
-          className="w-full rounded-lg bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+          className="w-full rounded-lg bg-red-500 px-4 py-3 text-sm font-semibold text-white shadow-sm shadow-red-200 transition hover:bg-red-600"
         >
-          保存并生成复习计划
+          添加到新背
         </button>
       </div>
     </form>
