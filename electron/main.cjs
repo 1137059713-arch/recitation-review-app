@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, screen, shell } = require('electron')
+const { app, BrowserWindow, Menu, ipcMain, screen, shell, dialog } = require('electron')
 const fs = require('fs/promises')
 const path = require('path')
 const { pathToFileURL } = require('url')
@@ -30,6 +30,13 @@ const EMPTY_STATE = {
     reviewLoadLevel: 'standard',
     backlogStrategy: 'balanced',
   },
+  appSettings: {
+    autoBackupEnabled: true,
+    emptyDataProtectionEnabled: true,
+    showSidebarTodayTasks: true,
+    launchAtLogin: false,
+    windowOpacity: 1,
+  },
 }
 
 const REVIEW_LOAD_LEVELS = new Set(['light', 'standard', 'strong'])
@@ -56,13 +63,119 @@ function normalizeScheduleSettings(settings) {
   }
 }
 
+function normalizeAppSettings(settings) {
+  const windowOpacity = Number(settings?.windowOpacity)
+
+  return {
+    autoBackupEnabled:
+      typeof settings?.autoBackupEnabled === 'boolean'
+        ? settings.autoBackupEnabled
+        : EMPTY_STATE.appSettings.autoBackupEnabled,
+    emptyDataProtectionEnabled:
+      typeof settings?.emptyDataProtectionEnabled === 'boolean'
+        ? settings.emptyDataProtectionEnabled
+        : EMPTY_STATE.appSettings.emptyDataProtectionEnabled,
+    showSidebarTodayTasks:
+      typeof settings?.showSidebarTodayTasks === 'boolean'
+        ? settings.showSidebarTodayTasks
+        : EMPTY_STATE.appSettings.showSidebarTodayTasks,
+    launchAtLogin:
+      typeof settings?.launchAtLogin === 'boolean'
+        ? settings.launchAtLogin
+        : EMPTY_STATE.appSettings.launchAtLogin,
+    windowOpacity: Number.isFinite(windowOpacity)
+      ? Math.min(1, Math.max(0.6, windowOpacity))
+      : EMPTY_STATE.appSettings.windowOpacity,
+  }
+}
+
 function normalizeState(value) {
   return {
     items: Array.isArray(value?.items) ? value.items : [],
     tasks: Array.isArray(value?.tasks) ? value.tasks : [],
     groups: Array.isArray(value?.groups) ? value.groups : [],
     scheduleSettings: normalizeScheduleSettings(value?.scheduleSettings),
+    appSettings: normalizeAppSettings(value?.appSettings),
   }
+}
+
+function hasRecitationContent(state) {
+  return (
+    Array.isArray(state?.items) && state.items.length > 0
+  ) || (
+    Array.isArray(state?.tasks) && state.tasks.length > 0
+  ) || (
+    Array.isArray(state?.groups) && state.groups.length > 0
+  )
+}
+
+function getBackupRelevantState(state) {
+  const normalizedState = normalizeState(state)
+
+  return {
+    items: normalizedState.items,
+    tasks: normalizedState.tasks,
+    groups: normalizedState.groups,
+    scheduleSettings: normalizedState.scheduleSettings,
+  }
+}
+
+function hasBackupRelevantChange(currentState, nextState) {
+  return (
+    JSON.stringify(getBackupRelevantState(currentState)) !==
+    JSON.stringify(getBackupRelevantState(nextState))
+  )
+}
+
+function createTimestamp() {
+  const now = new Date()
+  const pad = (value, size = 2) => String(value).padStart(size, '0')
+
+  return [
+    now.getFullYear(),
+    pad(now.getMonth() + 1),
+    pad(now.getDate()),
+    '-',
+    pad(now.getHours()),
+    pad(now.getMinutes()),
+    pad(now.getSeconds()),
+    '-',
+    pad(now.getMilliseconds(), 3),
+  ].join('')
+}
+
+async function createBackupFromRaw(rawValue, reason = 'auto') {
+  const parsedState = normalizeState(JSON.parse(rawValue))
+  if (!hasRecitationContent(parsedState)) return null
+
+  const backupDirectory = path.join(dataDirectory, 'backups')
+  await fs.mkdir(backupDirectory, { recursive: true })
+
+  const backupFilePath = path.join(
+    backupDirectory,
+    `recitation-data-${reason}-${createTimestamp()}.json`,
+  )
+
+  await fs.writeFile(backupFilePath, JSON.stringify(parsedState, null, 2), 'utf8')
+  return backupFilePath
+}
+
+async function createStartupBackup(rawValue) {
+  const parsedState = normalizeState(JSON.parse(rawValue))
+  const settings = normalizeAppSettings(parsedState.appSettings)
+  if (!settings.autoBackupEnabled || !hasRecitationContent(parsedState)) return null
+
+  const backupDirectory = path.join(dataDirectory, 'backups')
+  await fs.mkdir(backupDirectory, { recursive: true })
+
+  const today = createTimestamp().slice(0, 10)
+  const existingBackups = await fs.readdir(backupDirectory).catch(() => [])
+  const hasTodayBackup = existingBackups.some((fileName) =>
+    fileName.startsWith(`recitation-data-startup-${today}`),
+  )
+
+  if (hasTodayBackup) return null
+  return createBackupFromRaw(rawValue, 'startup')
 }
 
 async function ensureDataFile() {
@@ -80,6 +193,7 @@ async function readRecitationState() {
 
   try {
     const rawValue = await fs.readFile(dataFilePath, 'utf8')
+    await createStartupBackup(rawValue)
     return {
       state: normalizeState(JSON.parse(rawValue)),
       filePath: dataFilePath,
@@ -94,15 +208,102 @@ async function readRecitationState() {
 
 async function writeRecitationState(state) {
   await ensureDataFile()
-  await fs.writeFile(dataFilePath, JSON.stringify(normalizeState(state), null, 2), 'utf8')
+  const nextState = normalizeState(state)
+  const nextRawValue = JSON.stringify(nextState, null, 2)
+  const currentRawValue = await fs.readFile(dataFilePath, 'utf8').catch(() => null)
+  const currentState = currentRawValue ? normalizeState(JSON.parse(currentRawValue)) : EMPTY_STATE
+  const currentSettings = normalizeAppSettings(currentState.appSettings)
+  const shouldBackup =
+    currentSettings.autoBackupEnabled &&
+    currentRawValue &&
+    hasRecitationContent(currentState) &&
+    hasBackupRelevantChange(currentState, nextState)
+
+  if (
+    currentSettings.emptyDataProtectionEnabled &&
+    hasRecitationContent(currentState) &&
+    !hasRecitationContent(nextState)
+  ) {
+    const backupFilePath = shouldBackup
+      ? await createBackupFromRaw(currentRawValue, 'blocked-empty-overwrite')
+      : null
+
+    return {
+      ok: false,
+      blocked: true,
+      reason: 'empty-data-overwrite',
+      filePath: dataFilePath,
+      backupFilePath,
+    }
+  }
+
+  const backupFilePath = shouldBackup ? await createBackupFromRaw(currentRawValue, 'before-save') : null
+
+  await fs.writeFile(dataFilePath, nextRawValue, 'utf8')
+  applyAppSettings(nextState.appSettings)
+
   return {
     ok: true,
     filePath: dataFilePath,
+    backupFilePath,
   }
 }
 
 ipcMain.handle('recitation-storage:load', readRecitationState)
 ipcMain.handle('recitation-storage:save', (_event, state) => writeRecitationState(state))
+
+ipcMain.handle('recitation-storage:export', async () => {
+  await ensureDataFile()
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: '导出背诵数据',
+    defaultPath: `recitation-data-export-${createTimestamp()}.json`,
+    filters: [{ name: 'JSON 数据', extensions: ['json'] }],
+  })
+
+  if (result.canceled || !result.filePath) {
+    return { ok: false, canceled: true }
+  }
+
+  const { state } = await readRecitationState()
+  await fs.writeFile(result.filePath, JSON.stringify(normalizeState(state), null, 2), 'utf8')
+  return { ok: true, filePath: result.filePath }
+})
+
+ipcMain.handle('recitation-storage:import', async () => {
+  await ensureDataFile()
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: '导入背诵数据',
+    properties: ['openFile'],
+    filters: [{ name: 'JSON 数据', extensions: ['json'] }],
+  })
+
+  if (result.canceled || !result.filePaths?.[0]) {
+    return { ok: false, canceled: true }
+  }
+
+  const importedRawValue = await fs.readFile(result.filePaths[0], 'utf8')
+  const importedState = normalizeState(JSON.parse(importedRawValue))
+
+  if (!hasRecitationContent(importedState)) {
+    return { ok: false, reason: 'empty-import' }
+  }
+
+  const currentRawValue = await fs.readFile(dataFilePath, 'utf8').catch(() => null)
+  const backupFilePath = currentRawValue
+    ? await createBackupFromRaw(currentRawValue, 'before-import')
+    : null
+
+  await fs.writeFile(dataFilePath, JSON.stringify(importedState, null, 2), 'utf8')
+  applyAppSettings(importedState.appSettings)
+
+  return {
+    ok: true,
+    state: importedState,
+    filePath: dataFilePath,
+    importedFilePath: result.filePaths[0],
+    backupFilePath,
+  }
+})
 
 function getSidebarBounds(isShown) {
   const { workArea } = screen.getPrimaryDisplay()
@@ -246,6 +447,31 @@ function loadAppRoute(window, route = '/') {
   window.loadURL(`${indexUrl}#${route}`)
 }
 
+function applyAppSettings(rawSettings = EMPTY_STATE.appSettings) {
+  const settings = normalizeAppSettings(rawSettings)
+
+  app.setLoginItemSettings({
+    openAtLogin: settings.launchAtLogin,
+    path: process.execPath,
+  })
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setOpacity(settings.windowOpacity)
+  }
+
+  if (!app.isReady()) return
+
+  if (settings.showSidebarTodayTasks) {
+    if (!sidebarWindow || sidebarWindow.isDestroyed()) {
+      createSidebarWindow()
+    }
+  } else if (sidebarWindow && !sidebarWindow.isDestroyed()) {
+    sidebarWindow.close()
+    stopSidebarMouseMonitor()
+    sidebarIsShown = false
+  }
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1180,
@@ -262,6 +488,13 @@ function createWindow() {
   })
 
   loadAppRoute(mainWindow)
+  readRecitationState()
+    .then(({ state }) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.setOpacity(normalizeAppSettings(state.appSettings).windowOpacity)
+      }
+    })
+    .catch(() => {})
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
@@ -320,8 +553,15 @@ ipcMain.on('sidebar-panel:hide', () => animateSidebar(false))
 
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null)
-  createWindow()
-  createSidebarWindow()
+  readRecitationState()
+    .then(({ state }) => {
+      createWindow()
+      applyAppSettings(state.appSettings)
+    })
+    .catch(() => {
+      createWindow()
+      applyAppSettings(EMPTY_STATE.appSettings)
+    })
 
   screen.on('display-metrics-changed', () => {
     if (sidebarWindow && !sidebarWindow.isDestroyed()) {

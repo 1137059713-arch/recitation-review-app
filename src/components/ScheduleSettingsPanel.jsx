@@ -1,9 +1,9 @@
 import {
   BACKLOG_STRATEGIES,
-  REVIEW_LOAD_LEVELS,
   WEEKDAY_LABELS,
   normalizeScheduleSettings,
 } from '../utils/schedule.js'
+import { REVIEW_LOAD_LEVELS } from '../utils/load.js'
 
 const REVIEW_LIMIT_OPTIONS = [2, 3, 4]
 

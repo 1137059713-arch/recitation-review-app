@@ -1,14 +1,20 @@
 import assert from 'node:assert/strict'
-import { buildDaySchedules } from '../src/utils/calendarView.js'
-import { toDateKey } from '../src/utils/date.js'
+import { buildDaySchedules, getLoadMeta } from '../src/utils/calendarView.js'
+import {
+  getNewTaskLoad,
+  getReviewTaskLoad,
+  getScheduleCapacity,
+} from '../src/utils/load.js'
+import { addItemToState, completeTaskInState } from '../src/utils/recitationActions.js'
+import { addDays, toDateKey } from '../src/utils/date.js'
 import {
   createTask,
-  getNewTaskLoad,
+  createMilestoneReviewTask,
   getBacklogReviewTasksByPriority,
-  getReviewTaskLoad,
   getTaskScheduledDate,
   normalizeScheduleSettings,
   rebalanceReviewSchedule,
+  REVIEW_MILESTONE_DAYS,
 } from '../src/utils/schedule.js'
 
 function createDoneReviewOnDate(itemId, date) {
@@ -27,6 +33,30 @@ function testNormalizeScheduleSettings() {
   assert.deepEqual(normalizeScheduleSettings().restDays, [0])
   assert.deepEqual(normalizeScheduleSettings({ restDays: [2, 2, 8, -1] }).restDays, [2])
   assert.deepEqual(normalizeScheduleSettings({ restDays: [] }).restDays, [0])
+}
+
+function testStudyModeDefinesCapacity() {
+  assert.deepEqual(getScheduleCapacity({ reviewLoadLevel: 'light' }), {
+    maxReviewTasks: 2,
+    maxReviewLoad: 2.2,
+    maxStudyTasks: 4,
+    maxStudyLoad: 3.5,
+    maxBacklogPerDay: 2,
+  })
+  assert.deepEqual(getScheduleCapacity({ reviewLoadLevel: 'standard' }), {
+    maxReviewTasks: 3,
+    maxReviewLoad: 3.0,
+    maxStudyTasks: 4,
+    maxStudyLoad: 4.0,
+    maxBacklogPerDay: 3,
+  })
+  assert.deepEqual(getScheduleCapacity({ reviewLoadLevel: 'strong' }), {
+    maxReviewTasks: 4,
+    maxReviewLoad: 5.0,
+    maxStudyTasks: 5,
+    maxStudyLoad: 5.0,
+    maxBacklogPerDay: 4,
+  })
 }
 
 function testRestDayIsSkipped() {
@@ -104,7 +134,7 @@ function testAutomaticReviewStopsAtThreeTasks() {
   assert.equal(delayedBacklogCount, 1)
 }
 
-function testReviewLimitSettingChangesDailyCapacity() {
+function testReviewLimitSettingDoesNotOverrideStudyModeCapacity() {
   const today = '2026-05-18'
   const backlogTasks = Array.from({ length: 4 }, (_value, index) =>
     createTask({
@@ -124,7 +154,7 @@ function testReviewLimitSettingChangesDailyCapacity() {
     return getTaskScheduledDate(scheduledTask) === today
   }).length
 
-  assert.equal(todayCount, 2)
+  assert.equal(todayCount, 4)
 }
 
 function testReviewLoadLevelChangesDailyCapacity() {
@@ -159,7 +189,7 @@ function testReviewLoadLevelChangesDailyCapacity() {
   assert.equal(todayCount, 1)
 }
 
-function testBacklogStrategyChangesDailyCapacity() {
+function testBacklogStrategyDoesNotOverrideRemainingCapacity() {
   const today = '2026-05-18'
   const backlogTasks = Array.from({ length: 3 }, (_value, index) =>
     createTask({
@@ -179,10 +209,10 @@ function testBacklogStrategyChangesDailyCapacity() {
     return getTaskScheduledDate(scheduledTask) === today
   }).length
 
-  assert.equal(todayCount, 1)
+  assert.equal(todayCount, 3)
 }
 
-function testBalancedBacklogLeavesNormalReviewDayGentle() {
+function testBacklogUsesRemainingCapacityAfterNormalReviews() {
   const today = '2026-05-18'
   const normalTask = createTask({
     itemId: 'balanced-normal',
@@ -207,7 +237,7 @@ function testBalancedBacklogLeavesNormalReviewDayGentle() {
     return getTaskScheduledDate(scheduledTask) === today
   }).length
 
-  assert.equal(todayBacklogCount, 1)
+  assert.equal(todayBacklogCount, 3)
 }
 
 function testAggressiveBacklogFillsNormalReviewDayCapacity() {
@@ -450,16 +480,287 @@ function testCalendarLoadIncludesNewTaskDifficulty() {
   assert.equal(day.load, 2.5)
 }
 
+function testCalendarLoadMetaUsesStudyModeTotalLoadLimit() {
+  assert.equal(getLoadMeta(4.1, 4, false, { reviewLoadLevel: 'standard' }).width, '100%')
+  assert.equal(getLoadMeta(4.1, 4, false, { reviewLoadLevel: 'strong' }).width, '68%')
+}
+
+function createEmptyState() {
+  return {
+    items: [],
+    tasks: [],
+    groups: [],
+    scheduleSettings: {
+      restDays: [0],
+      dailyReviewLimit: 3,
+      reviewLoadLevel: 'standard',
+      backlogStrategy: 'balanced',
+    },
+  }
+}
+
+function testNewItemCreatesOnlyNewTask() {
+  const state = addItemToState(createEmptyState(), {
+    title: 'long-term item',
+    body: 'body',
+    reviewEndDay: 90,
+    isImportant: true,
+  })
+
+  assert.equal(state.tasks.length, 1)
+  assert.equal(state.tasks[0].type, 'new')
+  assert.equal(state.items[0].reviewEndDay, 90)
+  assert.equal(state.items[0].isImportant, true)
+}
+
+function testCompletingNewTaskCreatesFirstMilestoneReview() {
+  const state = addItemToState(createEmptyState(), {
+    title: 'first review item',
+    body: 'body',
+  })
+  const completedState = completeTaskInState(state, state.tasks[0].id)
+  const reviewTask = completedState.tasks.find((task) => task.type === 'review-1')
+
+  assert.equal(reviewTask.reviewStage, 0)
+  assert.equal(reviewTask.date, toDateKey(new Date(Date.now() + 86400000)))
+}
+
+function testEightyPercentAdvancesOneMilestone() {
+  const today = toDateKey()
+  const item = {
+    id: 'advance-item',
+    title: 'advance',
+    body: 'body',
+    createdAt: today,
+    reviewEndDay: 180,
+  }
+  const task = createMilestoneReviewTask({
+    itemId: item.id,
+    createdAt: today,
+    reviewStage: 1,
+  })
+  const state = {
+    ...createEmptyState(),
+    items: [item],
+    tasks: [{ ...task, scheduledDate: today }],
+  }
+  const completedState = completeTaskInState(state, task.id, 80)
+  const nextTask = completedState.tasks.find((candidate) => candidate.status !== 'done' && candidate.type === 'review-7')
+
+  assert.equal(nextTask.reviewStage, 2)
+  assert.equal(nextTask.date, addDays(today, 4))
+}
+
+function testFiftyPercentRepeatsCurrentMilestoneWithDistinctTaskId() {
+  const today = toDateKey()
+  const item = {
+    id: 'repeat-item',
+    title: 'repeat',
+    body: 'body',
+    createdAt: today,
+    reviewEndDay: 180,
+  }
+  const task = {
+    ...createMilestoneReviewTask({
+      itemId: item.id,
+      createdAt: today,
+      reviewStage: 2,
+    }),
+    scheduledDate: today,
+  }
+  const state = {
+    ...createEmptyState(),
+    items: [item],
+    tasks: [task],
+  }
+  const completedState = completeTaskInState(state, task.id, 50)
+  const nextTask = completedState.tasks.find((candidate) => candidate.status !== 'done')
+
+  assert.equal(nextTask.reviewStage, 2)
+  assert.equal(nextTask.date, addDays(today, 4))
+  assert.notEqual(nextTask.id, task.id)
+}
+
+function testImportantTwentyPercentMovesBackOneMilestone() {
+  const today = toDateKey()
+  const item = {
+    id: 'important-item',
+    title: 'important',
+    body: 'body',
+    createdAt: today,
+    reviewEndDay: 180,
+    isImportant: true,
+  }
+  const task = {
+    ...createMilestoneReviewTask({
+      itemId: item.id,
+      createdAt: today,
+      reviewStage: 3,
+    }),
+    scheduledDate: today,
+  }
+  const state = {
+    ...createEmptyState(),
+    items: [item],
+    tasks: [task],
+  }
+  const completedState = completeTaskInState(state, task.id, 20)
+  const nextTask = completedState.tasks.find((candidate) => candidate.status !== 'done')
+
+  assert.equal(nextTask.reviewStage, 2)
+  assert.equal(nextTask.date, addDays(today, 4))
+}
+
+function testOverdueLowScoreRepeatsIntervalFromCompletionDate() {
+  const today = toDateKey()
+  const item = {
+    id: 'overdue-repeat-item',
+    title: 'overdue repeat',
+    body: 'body',
+    createdAt: addDays(today, -30),
+    reviewEndDay: 180,
+  }
+  const task = {
+    ...createMilestoneReviewTask({
+      itemId: item.id,
+      createdAt: item.createdAt,
+      anchorDate: addDays(today, -20),
+      reviewStage: 3,
+    }),
+    scheduledDate: today,
+  }
+  const state = {
+    ...createEmptyState(),
+    items: [item],
+    tasks: [task],
+  }
+  const completedState = completeTaskInState(state, task.id, 50)
+  const nextTask = completedState.tasks.find((candidate) => candidate.status !== 'done')
+
+  assert.equal(nextTask.reviewStage, 3)
+  assert.equal(nextTask.date, addDays(today, 7))
+}
+
+function testMatureMasterySkipsOneMilestone() {
+  const today = toDateKey()
+  const item = {
+    id: 'skip-item',
+    title: 'skip',
+    body: 'body',
+    createdAt: today,
+    reviewEndDay: 180,
+  }
+  const doneTasks = REVIEW_MILESTONE_DAYS.slice(0, 4).map((day, index) => ({
+    ...createMilestoneReviewTask({
+      itemId: item.id,
+      createdAt: today,
+      reviewStage: index,
+    }),
+    status: 'done',
+    recallScore: 100,
+    scheduledDate: today,
+    date: toDateKey(new Date(Date.now() - (5 - index) * 86400000)),
+  }))
+  const task = {
+    ...createMilestoneReviewTask({
+      itemId: item.id,
+      createdAt: today,
+      reviewStage: 4,
+    }),
+    scheduledDate: today,
+  }
+  const state = {
+    ...createEmptyState(),
+    items: [item],
+    tasks: [...doneTasks, task],
+  }
+  const completedState = completeTaskInState(state, task.id, 100)
+  const nextTask = completedState.tasks.find((candidate) => candidate.status !== 'done' && candidate.itemId === item.id)
+
+  assert.equal(nextTask.type, 'review-90')
+  assert.equal(nextTask.reviewStage, 6)
+  assert.equal(nextTask.date, addDays(today, 30))
+}
+
+function testMatureMasteryDoesNotSkipStraightToFinalStage() {
+  const today = toDateKey()
+  const item = {
+    id: 'no-final-skip-item',
+    title: 'no final skip',
+    body: 'body',
+    createdAt: today,
+    reviewEndDay: 180,
+  }
+  const doneTasks = REVIEW_MILESTONE_DAYS.slice(0, 7).map((day, index) => ({
+    ...createMilestoneReviewTask({
+      itemId: item.id,
+      createdAt: today,
+      reviewStage: index,
+    }),
+    status: 'done',
+    recallScore: 100,
+    scheduledDate: today,
+    date: toDateKey(new Date(Date.now() - (8 - index) * 86400000)),
+  }))
+  const task = {
+    ...createMilestoneReviewTask({
+      itemId: item.id,
+      createdAt: today,
+      reviewStage: 7,
+    }),
+    scheduledDate: today,
+  }
+  const state = {
+    ...createEmptyState(),
+    items: [item],
+    tasks: [...doneTasks, task],
+  }
+  const completedState = completeTaskInState(state, task.id, 100)
+  const nextTask = completedState.tasks.find((candidate) => candidate.status !== 'done' && candidate.itemId === item.id)
+
+  assert.equal(nextTask.type, 'review-180')
+  assert.equal(nextTask.reviewStage, 8)
+  assert.equal(nextTask.date, addDays(today, 60))
+}
+
+function testReviewEndDayStopsBeyondSelectedMilestone() {
+  const today = toDateKey()
+  const item = {
+    id: 'end-item',
+    title: 'end',
+    body: 'body',
+    createdAt: today,
+    reviewEndDay: 90,
+  }
+  const task = {
+    ...createMilestoneReviewTask({
+      itemId: item.id,
+      createdAt: today,
+      reviewStage: 7,
+    }),
+    scheduledDate: today,
+  }
+  const state = {
+    ...createEmptyState(),
+    items: [item],
+    tasks: [task],
+  }
+  const completedState = completeTaskInState(state, task.id, 80)
+
+  assert.equal(completedState.tasks.filter((candidate) => candidate.status !== 'done').length, 0)
+}
+
 testNormalizeScheduleSettings()
+testStudyModeDefinesCapacity()
 testRestDayIsSkipped()
 testBacklogFillsTodayWhenCapacityExists()
 testMasteryScoreAffectsReviewLoad()
 testEstimatedDifficultyAffectsNewTaskLoad()
 testAutomaticReviewStopsAtThreeTasks()
-testReviewLimitSettingChangesDailyCapacity()
+testReviewLimitSettingDoesNotOverrideStudyModeCapacity()
 testReviewLoadLevelChangesDailyCapacity()
-testBacklogStrategyChangesDailyCapacity()
-testBalancedBacklogLeavesNormalReviewDayGentle()
+testBacklogStrategyDoesNotOverrideRemainingCapacity()
+testBacklogUsesRemainingCapacityAfterNormalReviews()
 testAggressiveBacklogFillsNormalReviewDayCapacity()
 testNewTasksDoNotConsumeReviewCapacity()
 testNewTaskDoesNotMoveScheduledReviewTasks()
@@ -469,5 +770,15 @@ testBacklogSortsByWeaknessWhenStageTies()
 testBacklogPrioritySelectorSkipsTodayTasks()
 testManualTodayReviewIsNotMovedByRebalance()
 testCalendarLoadIncludesNewTaskDifficulty()
+testCalendarLoadMetaUsesStudyModeTotalLoadLimit()
+testNewItemCreatesOnlyNewTask()
+testCompletingNewTaskCreatesFirstMilestoneReview()
+testEightyPercentAdvancesOneMilestone()
+testFiftyPercentRepeatsCurrentMilestoneWithDistinctTaskId()
+testImportantTwentyPercentMovesBackOneMilestone()
+testOverdueLowScoreRepeatsIntervalFromCompletionDate()
+testMatureMasterySkipsOneMilestone()
+testMatureMasteryDoesNotSkipStraightToFinalStage()
+testReviewEndDayStopsBeyondSelectedMilestone()
 
 console.log('schedule tests passed')

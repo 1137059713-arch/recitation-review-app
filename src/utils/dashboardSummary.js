@@ -1,5 +1,6 @@
 import { addDays, toDateKey } from './date.js'
-import { getNewTaskLoad, getReviewTaskLoad, getTaskScheduledDate } from './schedule.js'
+import { getNewTaskLoad, getReviewTaskLoad } from './load.js'
+import { getTaskScheduledDate } from './schedule.js'
 
 export function getWeekSummary(tasks) {
   const today = toDateKey()

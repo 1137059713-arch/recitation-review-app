@@ -1,5 +1,6 @@
 import { addDays, toDateKey } from './date.js'
-import { getNewTaskLoad, getReviewTaskLoad, getTaskScheduledDate } from './schedule.js'
+import { getNewTaskLoad, getReviewTaskLoad, getScheduleCapacity } from './load.js'
+import { getTaskScheduledDate } from './schedule.js'
 
 export const DAY_COUNT = 7
 export const WEEKDAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
@@ -13,7 +14,10 @@ export function getDateRange(startDate, count = DAY_COUNT) {
   return Array.from({ length: count }, (_, index) => addDays(startDate, index))
 }
 
-export function getLoadMeta(load, taskCount, isRestDay) {
+export function getLoadMeta(load, taskCount, isRestDay, settings) {
+  const capacity = getScheduleCapacity(settings)
+  const normalThreshold = capacity.maxStudyLoad * 0.7
+
   if (isRestDay) {
     return {
       label: '休息日',
@@ -23,7 +27,7 @@ export function getLoadMeta(load, taskCount, isRestDay) {
     }
   }
 
-  if (taskCount === 0 || load <= 1.4) {
+  if (taskCount === 0 || load < normalThreshold) {
     return {
       label: '轻松',
       badgeClass: 'border-emerald-100 bg-emerald-50 text-emerald-700',
@@ -32,7 +36,7 @@ export function getLoadMeta(load, taskCount, isRestDay) {
     }
   }
 
-  if (load <= 3) {
+  if (load <= capacity.maxStudyLoad) {
     return {
       label: '正常',
       badgeClass: 'border-slate-200 bg-slate-100 text-slate-600',
@@ -89,7 +93,7 @@ export function buildDaySchedules({ tasks, itemsById, groupsById, settings }) {
     const newLoad = newTasks.reduce((sum, task) => sum + getNewTaskLoad(task), 0)
     const displayLoad = reviewLoad + newLoad
     const isRestDay = restDays.includes(getWeekday(date))
-    const loadMeta = getLoadMeta(displayLoad, dayTasks.length, isRestDay)
+    const loadMeta = getLoadMeta(displayLoad, dayTasks.length, isRestDay, settings)
 
     return {
       date,

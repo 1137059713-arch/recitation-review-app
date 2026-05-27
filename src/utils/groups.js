@@ -1,3 +1,5 @@
+import { DEFAULT_REVIEW_END_DAY, normalizeReviewEndDay } from './schedule.js'
+
 export const GROUP_COLORS = [
   { name: '蓝色', value: '#2563eb' },
   { name: '绿色', value: '#16a34a' },
@@ -16,6 +18,7 @@ export function normalizeGroup(group) {
     isPinned: Boolean(group?.isPinned),
     progressEnabled: Boolean(group?.progressEnabled),
     totalChapters: Number(group?.totalChapters) > 0 ? Number(group.totalChapters) : 0,
+    reviewEndDay: normalizeReviewEndDay(group?.reviewEndDay ?? DEFAULT_REVIEW_END_DAY),
   }
 }
 

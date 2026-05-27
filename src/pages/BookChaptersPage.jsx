@@ -1,4 +1,7 @@
+import { useState } from 'react'
+import FullTextModal from '../components/FullTextModal.jsx'
 import { getOverviewSummary } from '../utils/overviewSummary.js'
+import { getReviewCount } from '../utils/mastery.js'
 
 function MasteryBadge({ mastery }) {
   const tones = {
@@ -16,8 +19,43 @@ function MasteryBadge({ mastery }) {
   )
 }
 
+function ReviewCountBadge({ count }) {
+  return (
+    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">
+      复习 {count} 次
+    </span>
+  )
+}
+
+function DeleteButton({ title, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 transition hover:bg-red-50 hover:text-red-600"
+      title={title}
+    >
+      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" aria-hidden="true">
+        <path d="M9 5h6M10 5l.5-1h3L14 5M6.5 8h11M8 8l.6 11h6.8L16 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M10.5 11v5M13.5 11v5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    </button>
+  )
+}
+
 function BookChaptersPage({ store }) {
+  const [readingItem, setReadingItem] = useState(null)
   const summary = getOverviewSummary(store)
+
+  function deleteItem(item) {
+    const confirmed = window.confirm(
+      `确定删除“${item.title}”吗？删除后，这条内容的所有复习计划也会一起删除。`,
+    )
+
+    if (confirmed) {
+      store.deleteItem(item.id)
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -58,13 +96,25 @@ function BookChaptersPage({ store }) {
                     这本书还没有章节内容。
                   </div>
                 ) : (
-                  book.items.map(({ item, mastery }) => (
+                  book.items.map(({ item, mastery, tasks }) => (
                     <article key={item.id} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
                       <div className="flex items-center justify-between gap-3">
                         <h4 className="truncate font-semibold text-slate-950">{item.title}</h4>
-                        <MasteryBadge mastery={mastery} />
+                        <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                          <ReviewCountBadge count={getReviewCount(tasks)} />
+                          <MasteryBadge mastery={mastery} />
+                          <DeleteButton title="删除章节" onClick={() => deleteItem(item)} />
+                        </div>
                       </div>
-                      <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-500">{item.body}</p>
+                      {item.body && (
+                        <button
+                          type="button"
+                          onClick={() => setReadingItem(item)}
+                          className="mt-4 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                        >
+                          查看正文
+                        </button>
+                      )}
                     </article>
                   ))
                 )}
@@ -73,6 +123,11 @@ function BookChaptersPage({ store }) {
           ))}
         </div>
       )}
+      <FullTextModal
+        title={readingItem?.title}
+        body={readingItem?.body}
+        onClose={() => setReadingItem(null)}
+      />
     </div>
   )
 }

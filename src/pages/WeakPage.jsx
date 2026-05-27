@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { getItemMastery, isWeakMastery } from '../utils/mastery.js'
+import { getItemMastery, getReviewCount, isWeakMastery } from '../utils/mastery.js'
 
 function MasteryBadge({ mastery }) {
   const toneClasses = {
@@ -13,6 +13,14 @@ function MasteryBadge({ mastery }) {
   return (
     <span className={['rounded-full px-2.5 py-1 text-xs font-semibold', toneClasses[mastery.tone] || toneClasses.slate].join(' ')}>
       {mastery.score ? `${mastery.score}% ` : ''}{mastery.status}
+    </span>
+  )
+}
+
+function ReviewCountBadge({ count }) {
+  return (
+    <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-500 ring-1 ring-red-100">
+      复习 {count} 次
     </span>
   )
 }
@@ -34,6 +42,7 @@ function WeakPage({ store }) {
       .map((item) => ({
         item,
         group: item.groupId ? store.groupsById.get(item.groupId) : null,
+        tasks: tasksByItemId.get(item.id) || [],
         mastery: getItemMastery(tasksByItemId.get(item.id) || []),
       }))
       .filter(({ mastery }) => isWeakMastery(mastery))
@@ -62,10 +71,11 @@ function WeakPage({ store }) {
           </div>
         ) : (
           <div className="mt-5 grid gap-3 md:grid-cols-2">
-            {weakItems.map(({ item, group, mastery }) => (
+            {weakItems.map(({ item, group, mastery, tasks }) => (
               <article key={item.id} className="rounded-lg border border-red-100 bg-white p-4 shadow-sm">
                 <div className="flex flex-wrap items-center gap-2">
                   <MasteryBadge mastery={mastery} />
+                  <ReviewCountBadge count={getReviewCount(tasks)} />
                   {group && <span className="text-sm font-semibold text-red-600">{group.name}</span>}
                 </div>
                 <h3 className="mt-2 text-base font-semibold text-slate-950">{item.title}</h3>

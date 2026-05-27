@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { ESTIMATED_DIFFICULTY_OPTIONS, DEFAULT_ESTIMATED_DIFFICULTY } from '../utils/difficulty.js'
 import { getChapterOptions, sortGroups } from '../utils/groups.js'
+import { DEFAULT_REVIEW_END_DAY, REVIEW_END_DAYS } from '../utils/schedule.js'
 
 const NEW_GROUP_VALUE = '__new_group__'
 
 function AddItemForm({
+  className = '',
   groups = [],
   items = [],
   headerExtra = null,
@@ -16,6 +18,9 @@ function AddItemForm({
   const [newGroupName, setNewGroupName] = useState('')
   const [newGroupProgressEnabled, setNewGroupProgressEnabled] = useState(false)
   const [newGroupTotalChapters, setNewGroupTotalChapters] = useState('')
+  const [newGroupReviewEndDay, setNewGroupReviewEndDay] = useState(DEFAULT_REVIEW_END_DAY)
+  const [reviewEndDay, setReviewEndDay] = useState(DEFAULT_REVIEW_END_DAY)
+  const [isImportant, setIsImportant] = useState(false)
   const [estimatedDifficulty, setEstimatedDifficulty] = useState(DEFAULT_ESTIMATED_DIFFICULTY)
   const [error, setError] = useState('')
   const sortedGroups = sortGroups(groups)
@@ -27,6 +32,7 @@ function AddItemForm({
   const usesChapterSelect =
     (selectedGroup?.progressEnabled || (isCreatingGroup && newGroupProgressEnabled)) &&
     selectedTotalChapters > 0
+  const usesBookReviewPlan = selectedGroup?.progressEnabled || (isCreatingGroup && newGroupProgressEnabled)
   const usedChapterTitles = new Set(
     items
       .filter((item) => item.groupId && item.groupId === groupChoice)
@@ -69,6 +75,9 @@ function AddItemForm({
       newGroupName: isCreatingGroup ? newGroupName : '',
       newGroupProgressEnabled,
       newGroupTotalChapters,
+      newGroupReviewEndDay,
+      reviewEndDay,
+      isImportant,
       estimatedDifficulty,
     })
     setTitle('')
@@ -77,22 +86,27 @@ function AddItemForm({
     setNewGroupName('')
     setNewGroupProgressEnabled(false)
     setNewGroupTotalChapters('')
+    setNewGroupReviewEndDay(DEFAULT_REVIEW_END_DAY)
+    setReviewEndDay(DEFAULT_REVIEW_END_DAY)
+    setIsImportant(false)
     setEstimatedDifficulty(DEFAULT_ESTIMATED_DIFFICULTY)
     setError('')
   }
 
   return (
-    <form onSubmit={handleSubmit} className="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
-      <div className="mb-5">
-        <p className="text-sm font-medium text-red-500">添加今日背诵</p>
-        <h2 className="mt-1 text-xl font-semibold text-slate-950">记录刚背完的内容</h2>
+    <form onSubmit={handleSubmit} className={`flex min-h-0 flex-col rounded-lg border border-slate-200 bg-white p-5 shadow-sm ${className}`}>
+      <div className="mb-4 flex shrink-0 items-center gap-3">
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-red-100 bg-red-50 text-red-500">
+          □
+        </span>
+        <h2 className="text-base font-semibold text-slate-950">添加背诵</h2>
       </div>
 
-      {headerExtra && <div className="mb-5">{headerExtra}</div>}
+      {headerExtra && <div className="mb-4 shrink-0">{headerExtra}</div>}
 
-      <div className="space-y-4">
+      <div className="no-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
         <label className="block">
-          <span className="text-sm font-medium text-slate-700">分组</span>
+          <span className="text-sm font-semibold text-slate-800">选择分组</span>
           <select
             value={groupChoice}
             onChange={(event) => {
@@ -100,9 +114,9 @@ function AddItemForm({
               setTitle('')
               setError('')
             }}
-            className="mt-2 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-slate-950 outline-none transition focus:border-red-300 focus:bg-white focus:ring-4 focus:ring-red-100"
+            className="mt-2 w-full rounded-md border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 outline-none transition focus:border-red-300 focus:ring-4 focus:ring-red-100"
           >
-            <option value="">未分组</option>
+            <option value="">请选择分组</option>
             {sortedGroups.map((group) => (
               <option key={group.id} value={group.id}>
                 {group.isPinned ? '★ ' : ''}{group.name}
@@ -115,11 +129,11 @@ function AddItemForm({
         {groupChoice === NEW_GROUP_VALUE && (
           <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
             <label className="block">
-              <span className="text-sm font-medium text-slate-700">新分组名称</span>
+              <span className="text-sm font-semibold text-slate-800">新分组名称</span>
               <input
                 value={newGroupName}
                 onChange={(event) => setNewGroupName(event.target.value)}
-                className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-slate-950 outline-none transition focus:border-red-300 focus:ring-4 focus:ring-red-100"
+                className="mt-2 w-full rounded-md border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 outline-none transition focus:border-red-300 focus:ring-4 focus:ring-red-100"
                 placeholder="例如：药理学"
               />
             </label>
@@ -139,27 +153,59 @@ function AddItemForm({
             </label>
 
             {newGroupProgressEnabled && (
-              <label className="block">
-                <span className="text-sm font-medium text-slate-700">总章节数</span>
-                <input
-                  type="number"
-                  min="1"
-                  value={newGroupTotalChapters}
-                  onChange={(event) => {
-                    setNewGroupTotalChapters(event.target.value)
-                    setTitle('')
-                    setError('')
-                  }}
-                  className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-slate-950 outline-none transition focus:border-red-300 focus:ring-4 focus:ring-red-100"
-                  placeholder="例如：20"
-                />
-              </label>
+              <>
+                <label className="block">
+                  <span className="text-sm font-semibold text-slate-800">总章节数</span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={newGroupTotalChapters}
+                    onChange={(event) => {
+                      setNewGroupTotalChapters(event.target.value)
+                      setTitle('')
+                      setError('')
+                    }}
+                    className="mt-2 w-full rounded-md border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 outline-none transition focus:border-red-300 focus:ring-4 focus:ring-red-100"
+                    placeholder="例如：20"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-sm font-semibold text-slate-800">书籍复习周期</span>
+                  <select
+                    value={newGroupReviewEndDay}
+                    onChange={(event) => setNewGroupReviewEndDay(Number(event.target.value))}
+                    className="mt-2 w-full rounded-md border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 outline-none transition focus:border-red-300 focus:ring-4 focus:ring-red-100"
+                  >
+                    {REVIEW_END_DAYS.map((day) => (
+                      <option key={day} value={day}>复习到第 {day} 天</option>
+                    ))}
+                  </select>
+                </label>
+              </>
             )}
           </div>
         )}
 
+        {!usesBookReviewPlan && (
+          <label className="block">
+            <span className="text-sm font-semibold text-slate-800">复习周期</span>
+            <select
+              value={reviewEndDay}
+              onChange={(event) => setReviewEndDay(Number(event.target.value))}
+              className="mt-2 w-full rounded-md border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 outline-none transition focus:border-red-300 focus:ring-4 focus:ring-red-100"
+            >
+              {REVIEW_END_DAYS.map((day) => (
+                <option key={day} value={day}>复习到第 {day} 天</option>
+              ))}
+            </select>
+          </label>
+        )}
+
         <label className="block">
-          <span className="text-sm font-medium text-slate-700">标题</span>
+          <span className="text-sm font-semibold text-slate-800">
+            {usesChapterSelect ? '选择章节' : '内容标题'}
+          </span>
           {usesChapterSelect ? (
             <select
               value={title}
@@ -167,9 +213,9 @@ function AddItemForm({
                 setTitle(event.target.value)
                 setError('')
               }}
-              className="mt-2 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-slate-950 outline-none transition focus:border-red-300 focus:bg-white focus:ring-4 focus:ring-red-100"
+              className="mt-2 w-full rounded-md border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 outline-none transition focus:border-red-300 focus:ring-4 focus:ring-red-100"
             >
-              <option value="">选择章节</option>
+              <option value="">请选择章节</option>
               {chapterOptions.map((chapter) => (
                 <option
                   key={chapter.value}
@@ -184,25 +230,44 @@ function AddItemForm({
             <input
               value={title}
               onChange={(event) => setTitle(event.target.value)}
-              className="mt-2 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-slate-950 outline-none transition focus:border-red-300 focus:bg-white focus:ring-4 focus:ring-red-100"
+              className="mt-2 w-full rounded-md border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 outline-none transition focus:border-red-300 focus:ring-4 focus:ring-red-100"
               placeholder="例如：英语 Unit 3 课文"
             />
           )}
         </label>
 
+        <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm transition hover:bg-slate-50">
+          <input
+            type="checkbox"
+            checked={isImportant}
+            onChange={(event) => setIsImportant(event.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-red-600 focus:ring-red-200"
+          />
+          <span>
+            <span className="block font-semibold text-slate-800">
+              {isImportant ? '重要内容' : '标记为重要内容'}
+            </span>
+            <span className="mt-1 block text-xs leading-5 text-slate-500">
+              掌握度很低时，系统会更保守地安排复习。
+            </span>
+          </span>
+        </label>
+
         <label className="block">
-          <span className="text-sm font-medium text-slate-700">正文</span>
+          <span className="text-sm font-semibold text-slate-800">输入要背诵的内容</span>
           <textarea
             value={body}
             onChange={(event) => setBody(event.target.value)}
             rows={7}
-            className="mt-2 w-full resize-y rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-slate-950 outline-none transition focus:border-red-300 focus:bg-white focus:ring-4 focus:ring-red-100"
-            placeholder="粘贴或输入今天背诵的正文"
+            maxLength={2000}
+            className="mt-2 w-full resize-y rounded-md border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 outline-none transition focus:border-red-300 focus:ring-4 focus:ring-red-100"
+            placeholder="支持粘贴长文本..."
           />
+          <span className="mt-1 block text-right text-xs text-slate-500">{body.length} / 2000</span>
         </label>
 
         <div>
-          <span className="text-sm font-medium text-slate-700">预计难度</span>
+          <span className="text-sm font-semibold text-slate-800">预计掌握难度</span>
           <div className="mt-2 grid grid-cols-4 gap-2">
             {ESTIMATED_DIFFICULTY_OPTIONS.map((option) => (
               <button
@@ -210,10 +275,10 @@ function AddItemForm({
                 type="button"
                 onClick={() => setEstimatedDifficulty(option.value)}
                 className={[
-                  'rounded-lg border px-3 py-2 text-sm font-semibold transition',
+                  'rounded-md border px-2 py-2 text-sm font-semibold transition',
                   estimatedDifficulty === option.value
                     ? 'border-red-300 bg-red-50 text-red-700'
-                    : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-white',
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
                 ].join(' ')}
                 title={`预计负载 ${option.load}`}
               >
@@ -223,15 +288,16 @@ function AddItemForm({
           </div>
         </div>
 
-        {error && <p className="text-sm font-medium text-red-600">{error}</p>}
-
-        <button
-          type="submit"
-          className="w-full rounded-lg bg-red-500 px-4 py-3 text-sm font-semibold text-white shadow-sm shadow-red-200 transition hover:bg-red-600"
-        >
-          添加到新背
-        </button>
       </div>
+
+      {error && <p className="mt-3 shrink-0 text-sm font-medium text-red-600">{error}</p>}
+
+      <button
+        type="submit"
+        className="mt-4 w-full shrink-0 rounded-md bg-red-500 px-4 py-3 text-sm font-semibold text-white shadow-sm shadow-red-200 transition hover:bg-red-600"
+      >
+        添加到新背
+      </button>
     </form>
   )
 }

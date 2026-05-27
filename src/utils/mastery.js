@@ -20,6 +20,10 @@ export function getReviewResults(tasks = []) {
     })
 }
 
+export function getReviewCount(tasks = []) {
+  return getReviewResults(tasks).length
+}
+
 export function getLatestReviewResult(tasks = []) {
   return getReviewResults(tasks)[0] || null
 }

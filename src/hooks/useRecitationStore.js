@@ -2,8 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { normalizeScheduleSettings, rebalanceReviewSchedule } from '../utils/schedule.js'
 import {
   isDesktopFileStorageAvailable,
+  exportState,
+  importState,
   loadLocalState,
   loadState,
+  normalizeAppSettings,
   saveState,
 } from '../utils/storage.js'
 import {
@@ -63,7 +66,9 @@ export function useRecitationStore() {
 
   useEffect(() => {
     if (!isReadyToSave) return
-    saveState(state)
+    saveState(state).catch((error) => {
+      console.error('Failed to save recitation state:', error)
+    })
   }, [isReadyToSave, state])
 
   const itemsById = useMemo(() => {
@@ -154,11 +159,37 @@ export function useRecitationStore() {
     )
   }
 
+  function updateAppSettings(updates) {
+    setState((current) =>
+      rebalanceState({
+        ...current,
+        appSettings: normalizeAppSettings({
+          ...current.appSettings,
+          ...updates,
+        }),
+      }),
+    )
+  }
+
+  async function exportData() {
+    return exportState()
+  }
+
+  async function importData() {
+    const result = await importState()
+    if (result?.ok && result.state) {
+      setState(rebalanceState(result.state))
+    }
+
+    return result
+  }
+
   return {
     items: state.items,
     tasks: state.tasks,
     groups: state.groups,
     scheduleSettings: state.scheduleSettings,
+    appSettings: normalizeAppSettings(state.appSettings),
     itemsById,
     groupsById,
     refreshState,
@@ -178,5 +209,8 @@ export function useRecitationStore() {
     scheduleReviewTaskToday,
     completeTask,
     updateScheduleSettings,
+    updateAppSettings,
+    exportData,
+    importData,
   }
 }

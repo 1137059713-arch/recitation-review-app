@@ -1,14 +1,19 @@
 import {
+  createMilestoneReviewTask,
   createInitialTasks,
   createTask,
   getBacklogReviewTasksByPriority,
+  getReviewEndStage,
+  getTaskReviewStage,
   getTaskScheduledDate,
   isReviewTask,
+  normalizeReviewEndDay,
   rebalanceReviewSchedule,
 } from './schedule.js'
 import { toDateKey } from './date.js'
 import { DEFAULT_GROUP_COLOR } from './groups.js'
 import { DEFAULT_ESTIMATED_DIFFICULTY, normalizeEstimatedDifficulty } from './difficulty.js'
+import { getItemMastery } from './mastery.js'
 
 export function createId() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -23,7 +28,13 @@ function normalizeTotalChapters(value) {
   return Number.isFinite(totalChapters) && totalChapters > 0 ? totalChapters : 0
 }
 
-function createGroup({ name, createdAt, progressEnabled = false, totalChapters = 0 }) {
+function createGroup({
+  name,
+  createdAt,
+  progressEnabled = false,
+  totalChapters = 0,
+  reviewEndDay = 180,
+}) {
   return {
     id: createId(),
     name: name.trim(),
@@ -32,6 +43,7 @@ function createGroup({ name, createdAt, progressEnabled = false, totalChapters =
     isPinned: false,
     progressEnabled: Boolean(progressEnabled),
     totalChapters: normalizeTotalChapters(totalChapters),
+    reviewEndDay: normalizeReviewEndDay(reviewEndDay),
   }
 }
 
@@ -49,6 +61,7 @@ export function addGroupToState(current, name, options = {}) {
     createdAt: toDateKey(),
     progressEnabled: options.progressEnabled,
     totalChapters: options.totalChapters,
+    reviewEndDay: options.reviewEndDay,
   })
 
   return {
@@ -69,6 +82,9 @@ export function addItemToState(
     newGroupName = '',
     newGroupProgressEnabled = false,
     newGroupTotalChapters = 0,
+    newGroupReviewEndDay = 180,
+    reviewEndDay = 180,
+    isImportant = false,
     estimatedDifficulty = DEFAULT_ESTIMATED_DIFFICULTY,
   },
 ) {
@@ -80,8 +96,11 @@ export function addItemToState(
         createdAt,
         progressEnabled: newGroupProgressEnabled,
         totalChapters: newGroupTotalChapters,
+        reviewEndDay: newGroupReviewEndDay,
       })
     : null
+  const group = newGroup || current.groups.find((candidate) => candidate.id === groupId)
+  const isBookItem = Boolean(group?.progressEnabled)
   const item = {
     id: createId(),
     title: title.trim(),
@@ -89,6 +108,8 @@ export function addItemToState(
     createdAt,
     groupId: newGroup ? newGroup.id : groupId || null,
     estimatedDifficulty: normalizeEstimatedDifficulty(estimatedDifficulty),
+    reviewEndDay: normalizeReviewEndDay(isBookItem ? group.reviewEndDay : reviewEndDay),
+    isImportant: Boolean(isImportant),
   }
   const nextTasks = [
     ...createInitialTasks(item.id, createdAt, item.estimatedDifficulty),
@@ -296,21 +317,93 @@ export function scheduleReviewTaskTodayInState(current, taskId) {
   }
 }
 
+function getMasteryLevel(score) {
+  const numericScore = Number(score)
+  if (numericScore < 40) return 20
+  if (numericScore < 70) return 50
+  if (numericScore < 90) return 80
+  return 100
+}
+
+function isImportantReviewTarget(item, group) {
+  return Boolean(item?.isImportant || item?.important || group?.isImportant || group?.important)
+}
+
+function getNextReviewStage({ task, item, group, itemTasks }) {
+  const reviewEndStage = getReviewEndStage(item?.reviewEndDay ?? group?.reviewEndDay)
+  const currentStage = task.type === 'new' ? -1 : getTaskReviewStage(task)
+  const reviewCount = itemTasks.filter((candidate) => candidate.status === 'done' && isReviewTask(candidate)).length
+  const mastery = getItemMastery(itemTasks)
+  const masteryLevel = task.type === 'new' ? 80 : getMasteryLevel(mastery.score)
+  const isImportant = isImportantReviewTarget(item, group)
+
+  if (masteryLevel === 20) {
+    return isImportant ? Math.max(0, currentStage - 1) : Math.max(0, currentStage)
+  }
+
+  if (masteryLevel === 50) {
+    return Math.max(0, currentStage)
+  }
+
+  if (masteryLevel === 100 && reviewCount >= 4) {
+    const skipTargetStage = Math.min(reviewEndStage, currentStage + 2)
+    const stageBeforeEnd = Math.max(0, reviewEndStage - 1)
+    return currentStage < stageBeforeEnd
+      ? Math.min(skipTargetStage, stageBeforeEnd)
+      : Math.min(reviewEndStage, currentStage + 1)
+  }
+
+  return Math.min(reviewEndStage, currentStage + 1)
+}
+
+function createNextReviewTask({ task, item, group, tasks, completedAt }) {
+  if (!item) return null
+
+  const itemTasks = tasks.filter((candidate) => candidate.itemId === task.itemId)
+  const currentStage = task.type === 'new' ? -1 : getTaskReviewStage(task)
+  const nextStage = getNextReviewStage({ task, item, group, itemTasks })
+  const reviewEndStage = getReviewEndStage(item.reviewEndDay ?? group?.reviewEndDay)
+  const masteryLevel = task.type === 'new' ? 80 : getMasteryLevel(getItemMastery(itemTasks).score)
+
+  if (nextStage > reviewEndStage) return null
+  if (currentStage >= reviewEndStage && masteryLevel >= 80) return null
+
+  const alreadyHasPendingStage = itemTasks.some(
+    (candidate) =>
+      candidate.status !== 'done' &&
+      isReviewTask(candidate) &&
+      getTaskReviewStage(candidate) === nextStage,
+  )
+
+  if (alreadyHasPendingStage) return null
+
+  return createMilestoneReviewTask({
+    itemId: item.id,
+    createdAt: item.createdAt,
+    anchorDate: completedAt,
+    reviewStage: nextStage,
+    sourceTaskId: task.id,
+  })
+}
+
 export function completeTaskInState(current, taskId, recallScore = null) {
   const task = current.tasks.find((candidate) => candidate.id === taskId)
   if (!task) return current
-  if (getTaskScheduledDate(task) > toDateKey() && task.status !== 'done') return current
+  const completedAt = toDateKey()
+  if (getTaskScheduledDate(task) > completedAt && task.status !== 'done') return current
 
   if (task.status === 'done') {
-    const nextTasks = current.tasks.map((candidate) =>
-      candidate.id === taskId
-        ? {
-            ...candidate,
-            status: 'pending',
-            recallScore: null,
-          }
-        : candidate,
-    )
+    const nextTasks = current.tasks
+      .filter((candidate) => candidate.sourceTaskId !== taskId)
+      .map((candidate) =>
+        candidate.id === taskId
+          ? {
+              ...candidate,
+              status: 'pending',
+              recallScore: null,
+            }
+          : candidate,
+      )
 
     return {
       ...current,
@@ -327,9 +420,22 @@ export function completeTaskInState(current, taskId, recallScore = null) {
         }
       : candidate,
   )
+  const item = current.items.find((candidate) => candidate.id === task.itemId)
+  const group = item?.groupId ? current.groups.find((candidate) => candidate.id === item.groupId) : null
+  const nextReviewTask = createNextReviewTask({
+    task: {
+      ...task,
+      status: 'done',
+      recallScore,
+    },
+    item,
+    group,
+    tasks: updatedTasks,
+    completedAt,
+  })
 
   return {
     ...current,
-    tasks: rebalanceReviewSchedule(updatedTasks),
+    tasks: rebalanceReviewSchedule(nextReviewTask ? [...updatedTasks, nextReviewTask] : updatedTasks),
   }
 }

@@ -3,11 +3,11 @@ import naughtyGif from '../assets/naughty.gif'
 import {
   getBacklogReviewTasksByPriority,
   getOverdueReviewTasksByPriority,
-  getReviewTaskLoad,
   getTaskScheduledDate,
   isReviewTask,
   TASK_LABELS,
 } from '../utils/schedule.js'
+import { getReviewTaskLoad } from '../utils/load.js'
 import { compareDateKey, formatDate, toDateKey } from '../utils/date.js'
 
 function getOverdueDays(dateKey, today) {

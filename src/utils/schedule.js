@@ -1,12 +1,22 @@
 import { addDays, compareDateKey, toDateKey } from './date.js'
-import { DEFAULT_ESTIMATED_DIFFICULTY, getEstimatedDifficultyLoad, normalizeEstimatedDifficulty } from './difficulty.js'
+import { DEFAULT_ESTIMATED_DIFFICULTY, normalizeEstimatedDifficulty } from './difficulty.js'
+import { REVIEW_LOAD_LEVELS, getReviewTaskLoad, getScheduleCapacity } from './load.js'
+
+export {
+  DAILY_MAX_REVIEW_LOAD,
+  DAILY_MAX_REVIEW_TASKS,
+  DAILY_MAX_STUDY_LOAD,
+  DAILY_MAX_STUDY_TASKS,
+  DAILY_REVIEW_LIMIT,
+  DAILY_TARGET_REVIEW_LOAD,
+  DAILY_TARGET_STUDY_LOAD,
+  REVIEW_LOAD_LEVELS,
+  getNewTaskLoad,
+  getReviewTaskLoad,
+  getScheduleCapacity,
+} from './load.js'
 
 export const WEEKDAY_LABELS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
-export const REVIEW_LOAD_LEVELS = {
-  light: { label: '轻松', load: 2.2, description: '复习压力更低，适合忙碌日。' },
-  standard: { label: '标准', load: 3.0, description: '默认节奏，复习和休息比较均衡。' },
-  strong: { label: '加强', load: 4.0, description: '更积极消化任务，适合状态好的阶段。' },
-}
 export const BACKLOG_STRATEGIES = {
   conservative: { label: '保守', description: '每天最多自动补 1 条逾期任务。' },
   balanced: { label: '均衡', description: '按当天余量自动补排，避免压力突然变大。' },
@@ -19,46 +29,82 @@ export const DEFAULT_SCHEDULE_SETTINGS = {
   backlogStrategy: 'balanced',
 }
 
-export const REVIEW_STEPS = [
-  { type: 'review-1', label: '第 1 天复习', days: 1 },
-  { type: 'review-7', label: '第 7 天复习', days: 7 },
-  { type: 'review-14', label: '第 14 天复习', days: 14 },
-  { type: 'review-28', label: '第 28 天复习', days: 28 },
-]
+export const REVIEW_INTERVAL_DAYS = [1, 2, 4, 7, 16, 30, 30, 30, 60]
+export const REVIEW_MILESTONE_DAYS = [1, 3, 7, 14, 30, 60, 90, 120, 180]
+export const REVIEW_END_DAYS = [30, 90, 180]
+export const DEFAULT_REVIEW_END_DAY = 180
+
+export const REVIEW_STEPS = REVIEW_MILESTONE_DAYS.map((days, index) => ({
+  type: `review-${days}`,
+  label: `累计第 ${days} 天复习`,
+  days,
+  intervalDays: REVIEW_INTERVAL_DAYS[index],
+}))
 
 export const TASK_LABELS = {
   new: '今日新背',
-  'review-1': '第 1 天复习',
-  'review-3': '第 3 天补强',
-  'review-7': '第 7 天复习',
-  'review-14': '第 14 天复习',
-  'review-28': '第 28 天复习',
+  'review-1': '间隔 1 天复习',
+  'review-3': '间隔 3 天复习',
+  'review-7': '间隔 7 天复习',
+  'review-14': '间隔 14 天复习',
+  'review-28': '累计第 30 天复习',
+  'review-30': '累计第 30 天复习',
+  'review-60': '累计第 60 天复习',
+  'review-90': '累计第 90 天复习',
+  'review-120': '累计第 120 天复习',
+  'review-180': '累计第 180 天复习',
   'custom-review': '自定义复习',
 }
 
-export const DAILY_TARGET_STUDY_LOAD = 3
-export const DAILY_MAX_STUDY_LOAD = 4
-export const DAILY_MAX_STUDY_TASKS = 4
+const REVIEW_RULES = Object.fromEntries(
+  REVIEW_MILESTONE_DAYS.map((days, index) => [
+    `review-${days}`,
+    { priority: index + 1, maxDelay: Math.max(1, Math.ceil(days / 7)) },
+  ]),
+)
 
-export const DAILY_REVIEW_LIMIT = DAILY_TARGET_STUDY_LOAD
-export const DAILY_TARGET_REVIEW_LOAD = DAILY_TARGET_STUDY_LOAD
-export const DAILY_MAX_REVIEW_LOAD = DAILY_TARGET_STUDY_LOAD
-export const DAILY_MAX_REVIEW_TASKS = 3
+REVIEW_RULES['review-28'] = REVIEW_RULES['review-30']
+REVIEW_RULES['custom-review'] = { priority: REVIEW_MILESTONE_DAYS.length + 1, maxDelay: 5 }
 
-const REVIEW_LOAD_BY_SCORE = {
-  20: 1.4,
-  50: 1,
-  80: 0.7,
-  100: 0.5,
+export function normalizeReviewEndDay(value) {
+  const reviewEndDay = Number(value)
+  if (reviewEndDay === 28) return 30
+  return REVIEW_END_DAYS.includes(reviewEndDay) ? reviewEndDay : DEFAULT_REVIEW_END_DAY
 }
 
-const REVIEW_RULES = {
-  'review-1': { priority: 1, maxDelay: 1 },
-  'review-3': { priority: 2, maxDelay: 1 },
-  'review-7': { priority: 3, maxDelay: 2 },
-  'review-14': { priority: 4, maxDelay: 4 },
-  'review-28': { priority: 5, maxDelay: 5 },
-  'custom-review': { priority: 6, maxDelay: 5 },
+export function getReviewMilestoneIndexByDay(day) {
+  const normalizedDay = Number(day) === 28 ? 30 : Number(day)
+  return REVIEW_MILESTONE_DAYS.indexOf(normalizedDay)
+}
+
+export function getReviewEndStage(reviewEndDay = DEFAULT_REVIEW_END_DAY) {
+  const normalizedEndDay = normalizeReviewEndDay(reviewEndDay)
+  return getReviewMilestoneIndexByDay(normalizedEndDay)
+}
+
+function getReviewDayFromType(type) {
+  const match = String(type || '').match(/^review-(\d+)$/)
+  return match ? Number(match[1]) : null
+}
+
+export function getTaskReviewStage(task) {
+  if (Number.isInteger(task?.reviewStage)) {
+    return Math.min(REVIEW_MILESTONE_DAYS.length - 1, Math.max(0, task.reviewStage))
+  }
+
+  const reviewDay = Number(task?.reviewDay ?? getReviewDayFromType(task?.type))
+  const stage = getReviewMilestoneIndexByDay(reviewDay)
+  return stage >= 0 ? stage : 0
+}
+
+export function getTaskReviewDay(task) {
+  const stage = getTaskReviewStage(task)
+  return REVIEW_MILESTONE_DAYS[stage] || REVIEW_MILESTONE_DAYS[0]
+}
+
+export function getTaskReviewIntervalDays(task) {
+  const stage = getTaskReviewStage(task)
+  return REVIEW_INTERVAL_DAYS[stage] || REVIEW_INTERVAL_DAYS[0]
 }
 
 export function getTaskScheduledDate(task) {
@@ -90,25 +136,6 @@ export function normalizeScheduleSettings(settings = {}) {
   }
 }
 
-export function getScheduleCapacity(rawSettings = DEFAULT_SCHEDULE_SETTINGS) {
-  const settings = normalizeScheduleSettings(rawSettings)
-  const maxReviewTasks = settings.dailyReviewLimit
-  const maxReviewLoad = REVIEW_LOAD_LEVELS[settings.reviewLoadLevel].load
-  const maxBacklogPerDay = {
-    conservative: 1,
-    balanced: maxReviewTasks,
-    aggressive: maxReviewTasks,
-  }[settings.backlogStrategy]
-
-  return {
-    maxReviewTasks,
-    maxReviewLoad,
-    maxStudyTasks: Math.max(DAILY_MAX_STUDY_TASKS, maxReviewTasks + 1),
-    maxStudyLoad: Math.max(DAILY_MAX_STUDY_LOAD, maxReviewLoad),
-    maxBacklogPerDay,
-  }
-}
-
 function getWeekday(dateKey) {
   const [year, month, day] = dateKey.split('-').map(Number)
   return new Date(year, month - 1, day).getDay()
@@ -122,15 +149,41 @@ export function isReviewTask(task) {
   return task.type !== 'new'
 }
 
-export function createTask({ itemId, type, date, estimatedDifficulty = DEFAULT_ESTIMATED_DIFFICULTY }) {
+export function createTask({
+  itemId,
+  type,
+  date,
+  estimatedDifficulty = DEFAULT_ESTIMATED_DIFFICULTY,
+  id = null,
+  reviewStage = null,
+  reviewDay = null,
+  sourceTaskId = null,
+}) {
+  const normalizedReviewStage = Number.isInteger(reviewStage)
+    ? Math.min(REVIEW_MILESTONE_DAYS.length - 1, Math.max(0, reviewStage))
+    : null
+  const normalizedReviewDay = reviewDay || (
+    normalizedReviewStage !== null ? REVIEW_MILESTONE_DAYS[normalizedReviewStage] : getReviewDayFromType(type)
+  )
+
   return {
-    id: type === 'custom-review' ? `${itemId}-${type}-${date}` : `${itemId}-${type}`,
+    id: id || (
+      sourceTaskId
+        ? `${itemId}-${type}-${date}-${sourceTaskId}`
+        : type === 'custom-review' || normalizedReviewStage !== null
+        ? `${itemId}-${type}-${date}`
+        : `${itemId}-${type}`
+    ),
     itemId,
     type,
     date,
     scheduledDate: date,
     status: 'pending',
     recallScore: null,
+    ...(normalizedReviewStage !== null
+      ? { reviewStage: normalizedReviewStage, reviewDay: normalizedReviewDay }
+      : {}),
+    ...(sourceTaskId ? { sourceTaskId } : {}),
     ...(type === 'new'
       ? { estimatedDifficulty: normalizeEstimatedDifficulty(estimatedDifficulty) }
       : {}),
@@ -140,13 +193,6 @@ export function createTask({ itemId, type, date, estimatedDifficulty = DEFAULT_E
 export function createInitialTasks(itemId, createdAt, estimatedDifficulty = DEFAULT_ESTIMATED_DIFFICULTY) {
   return [
     createTask({ itemId, type: 'new', date: createdAt, estimatedDifficulty }),
-    ...REVIEW_STEPS.map((step) =>
-      createTask({
-        itemId,
-        type: step.type,
-        date: addDays(createdAt, step.days),
-      }),
-    ),
   ]
 }
 
@@ -155,40 +201,33 @@ export function createThirdDayTask(itemId, createdAt) {
     itemId,
     type: 'review-3',
     date: addDays(createdAt, 3),
+    reviewStage: getReviewMilestoneIndexByDay(3),
+  })
+}
+
+export function createMilestoneReviewTask({
+  itemId,
+  createdAt,
+  anchorDate = createdAt,
+  reviewStage,
+  sourceTaskId = null,
+}) {
+  const stage = Math.min(REVIEW_MILESTONE_DAYS.length - 1, Math.max(0, Number(reviewStage) || 0))
+  const reviewDay = REVIEW_MILESTONE_DAYS[stage]
+  const intervalDays = REVIEW_INTERVAL_DAYS[stage]
+
+  return createTask({
+    itemId,
+    type: `review-${reviewDay}`,
+    date: addDays(anchorDate, intervalDays),
+    reviewStage: stage,
+    reviewDay,
+    sourceTaskId,
   })
 }
 
 function getRule(task) {
   return REVIEW_RULES[task.type] || REVIEW_RULES['custom-review']
-}
-
-function getLatestPriorRecallScore(task, tasks) {
-  const priorResults = tasks
-    .filter(
-      (candidate) =>
-        candidate.id !== task.id &&
-        candidate.itemId === task.itemId &&
-        candidate.status === 'done' &&
-        isReviewTask(candidate) &&
-        candidate.recallScore !== null &&
-        candidate.recallScore !== undefined &&
-        compareDateKey(getTaskScheduledDate(candidate), task.date) <= 0,
-    )
-    .sort((a, b) => {
-      const dateCompare = compareDateKey(getTaskScheduledDate(b), getTaskScheduledDate(a))
-      return dateCompare || b.id.localeCompare(a.id)
-    })
-
-  return priorResults[0]?.recallScore ?? null
-}
-
-export function getReviewTaskLoad(task, tasks = []) {
-  const score = Number(getLatestPriorRecallScore(task, tasks))
-  return REVIEW_LOAD_BY_SCORE[score] || 1
-}
-
-export function getNewTaskLoad(task) {
-  return getEstimatedDifficultyLoad(task.estimatedDifficulty)
 }
 
 function getReviewStats(tasks, allTasks) {
@@ -210,21 +249,16 @@ function getReviewStats(tasks, allTasks) {
   }, new Map())
 }
 
-function canPlaceTaskOnDate({ date, taskLoad, statsByDate, settings, isBacklog }) {
+function canPlaceTaskOnDate({ date, taskLoad, statsByDate, settings }) {
   if (isRestDay(date, settings)) return false
 
   const capacity = getScheduleCapacity(settings)
   const stats = statsByDate.get(date) || { load: 0, count: 0, backlogCount: 0, normalCount: 0 }
   const nextLoad = stats.load + taskLoad
   const nextCount = stats.count + 1
-  const nextBacklogCount = stats.backlogCount + (isBacklog ? 1 : 0)
-  const backlogLimit = settings.backlogStrategy === 'balanced' && stats.normalCount > 0
-    ? 1
-    : capacity.maxBacklogPerDay
 
   if (nextLoad > capacity.maxReviewLoad) return false
   if (nextCount > capacity.maxReviewTasks) return false
-  if (isBacklog && nextBacklogCount > backlogLimit) return false
 
   return true
 }

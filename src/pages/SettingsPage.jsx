@@ -1,87 +1,224 @@
-import ScheduleSettingsPanel from '../components/ScheduleSettingsPanel.jsx'
+import { useState } from 'react'
 import {
-  BACKLOG_STRATEGIES,
-  REVIEW_LOAD_LEVELS,
-  getScheduleCapacity,
-  normalizeScheduleSettings,
-} from '../utils/schedule.js'
-
-function RuleCard({ title, description, rows }) {
-  return (
-    <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-      <div>
-        <p className="text-sm font-medium text-red-500">{title}</p>
-        <h3 className="mt-1 text-lg font-semibold text-slate-950">{description}</h3>
-      </div>
-
-      <div className="mt-5 divide-y divide-slate-100">
-        {rows.map((row) => (
-          <div key={row.label} className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
-            <span className="text-sm font-medium text-slate-500">{row.label}</span>
-            <span className="text-sm font-semibold text-slate-950">{row.value}</span>
-          </div>
-        ))}
-      </div>
-    </section>
-  )
-}
+  OutlineButton,
+  OpacitySlider,
+  RestDayPanel,
+  StudyModePicker,
+  Toggle,
+} from '../components/settings/SettingsControls.jsx'
+import {
+  Card,
+  CardTitle,
+  ModeSummaryRow,
+  RhythmTip,
+  SettingPanel,
+  StaticRow,
+} from '../components/settings/SettingsPrimitives.jsx'
+import { STUDY_MODE_OPTIONS } from '../components/settings/settingsOptions.js'
+import { normalizeScheduleSettings } from '../utils/schedule.js'
+import { normalizeAppSettings } from '../utils/storage.js'
 
 function SettingsPage({ store }) {
+  const [dataMessage, setDataMessage] = useState('')
   const settings = normalizeScheduleSettings(store.scheduleSettings)
-  const capacity = getScheduleCapacity(settings)
-  const loadLevel = REVIEW_LOAD_LEVELS[settings.reviewLoadLevel]
-  const backlogStrategy = BACKLOG_STRATEGIES[settings.backlogStrategy]
+  const appSettings = normalizeAppSettings(store.appSettings)
+  const restDay = settings.restDays[0] ?? 0
+  const currentMode = STUDY_MODE_OPTIONS.find((option) => option.value === settings.reviewLoadLevel) || STUDY_MODE_OPTIONS[1]
+
+  function updateSetting(updates) {
+    store.updateScheduleSettings({
+      ...settings,
+      ...updates,
+    })
+  }
+
+  function updateAppSetting(updates) {
+    store.updateAppSettings(updates)
+  }
+
+  async function handleExportData() {
+    const result = await store.exportData()
+    if (result?.canceled) return
+    setDataMessage(result?.ok ? `已导出到 ${result.filePath}` : '导出失败，请稍后重试')
+  }
+
+  async function handleImportData() {
+    const result = await store.importData()
+    if (result?.canceled) return
+
+    if (result?.ok) {
+      setDataMessage('导入完成，导入前的数据已自动备份')
+      return
+    }
+
+    setDataMessage(result?.reason === 'empty-import' ? '导入文件没有有效背诵数据，已取消' : '导入失败，请检查文件格式')
+  }
 
   return (
     <div className="space-y-5">
-      <div>
-        <p className="text-sm font-medium text-red-500">设置中心</p>
-        <h2 className="mt-1 text-2xl font-semibold text-slate-950">排程规则</h2>
-        <p className="mt-1 text-sm text-slate-500">
-          这里集中管理休息日、复习上限和逾期补排逻辑。
-        </p>
-      </div>
+      <header>
+        <h1 className="text-2xl font-semibold text-slate-950">设置中心</h1>
+        <p className="mt-2 text-sm text-slate-500">把复杂规则收进轻量的学习节奏里。</p>
+      </header>
 
-      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <ScheduleSettingsPanel
-          settings={store.scheduleSettings}
-          onUpdate={store.updateScheduleSettings}
-        />
-      </section>
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <Card>
+          <div className="overflow-hidden rounded-lg border border-slate-200">
+            <SettingPanel
+              icon="wave"
+              tone="violet"
+              title="学习模式"
+              description="选择今天更偏向新背、均衡推进，还是优先复习。"
+            >
+              <StudyModePicker
+                value={settings.reviewLoadLevel}
+                onChange={(value) => updateSetting({ reviewLoadLevel: value })}
+              />
+            </SettingPanel>
+
+            <RestDayPanel value={restDay} onChange={updateSetting} />
+          </div>
+
+          <RhythmTip />
+        </Card>
+
+        <Card>
+          <CardTitle
+            icon="eye"
+            tone="violet"
+            title="模式说明"
+            description="用更直观的方式理解当前学习节奏。"
+          />
+
+          <div className="mt-5 overflow-hidden rounded-lg border border-slate-200">
+            <ModeSummaryRow
+              icon="wave"
+              tone="emerald"
+              title={`今日倾向：${currentMode.tendency}`}
+              description={currentMode.description}
+            />
+            <ModeSummaryRow
+              icon="calendar"
+              tone="amber"
+              title="大概任务量"
+              description={currentMode.workload}
+            />
+            <ModeSummaryRow
+              icon="grid"
+              tone="violet"
+              title="积压处理"
+              description={currentMode.backlog}
+            />
+            <ModeSummaryRow
+              icon="eye"
+              tone="blue"
+              title="节奏建议"
+              description={currentMode.note}
+            />
+          </div>
+
+          <p className="mt-4 text-sm text-slate-500">
+            当前模式约束由系统统一换算，日程页会按对应总负载参考线判断当天是否偏多。
+          </p>
+        </Card>
+      </div>
 
       <div className="grid gap-5 xl:grid-cols-2">
-        <RuleCard
-          title="温和复习节奏"
-          description="系统默认只自动安排复习，不强迫每天新背。"
-          rows={[
-            { label: '每日自动复习上限', value: `${capacity.maxReviewTasks} 条` },
-            { label: '每日复习负载上限', value: `${loadLevel.label} · ${capacity.maxReviewLoad.toFixed(1)}` },
-            { label: '新背任务', value: '手动添加，不挤掉当天复习' },
-          ]}
-        />
+        <Card>
+          <CardTitle
+            icon="shield"
+            tone="blue"
+            title="数据安全"
+            description="保护你的学习数据，防止意外丢失。"
+          />
 
-        <RuleCard
-          title="总学习负载"
-          description="日程展示会把新背和复习合并估算。"
-          rows={[
-            { label: '总学习负载参考线', value: capacity.maxStudyLoad.toFixed(1) },
-            { label: '总任务数量参考线', value: `${capacity.maxStudyTasks} 条` },
-            { label: '负载用途', value: '只用于展示压力，不强制新背' },
-          ]}
-        />
+          <div className="mt-5 overflow-hidden rounded-lg border border-slate-200">
+            <StaticRow
+              icon="shield"
+              title="自动备份"
+              description="每天自动备份到本地"
+              trailing={(
+                <Toggle
+                  checked={appSettings.autoBackupEnabled}
+                  onChange={(value) => updateAppSetting({ autoBackupEnabled: value })}
+                />
+              )}
+            />
+            <StaticRow
+              icon="shield"
+              title="空数据保护"
+              description="检测到空数据时自动备份当前数据"
+              trailing={(
+                <Toggle
+                  checked={appSettings.emptyDataProtectionEnabled}
+                  onChange={(value) => updateAppSetting({ emptyDataProtectionEnabled: value })}
+                />
+              )}
+            />
+            <StaticRow
+              icon="shield"
+              title="导入导出"
+              description="手动导出或从备份文件导入数据"
+              trailing={(
+                <div className="flex gap-2">
+                  <OutlineButton onClick={handleExportData}>导出数据</OutlineButton>
+                  <OutlineButton onClick={handleImportData}>导入数据</OutlineButton>
+                </div>
+              )}
+            />
+          </div>
+          {dataMessage && (
+            <p className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+              {dataMessage}
+            </p>
+          )}
+        </Card>
+
+        <Card>
+          <CardTitle
+            icon="desktop"
+            tone="blue"
+            title="桌面体验"
+            description="个性化你的使用体验。"
+          />
+
+          <div className="mt-5 overflow-hidden rounded-lg border border-slate-200">
+            <StaticRow
+              icon="desktop"
+              title="在侧边栏显示今日任务"
+              description="启动应用时默认选中今日任务"
+              trailing={(
+                <Toggle
+                  checked={appSettings.showSidebarTodayTasks}
+                  onChange={(value) => updateAppSetting({ showSidebarTodayTasks: value })}
+                />
+              )}
+            />
+            <StaticRow
+              icon="clock"
+              title="开机自动启动"
+              description="登录 Windows 后自动启动应用"
+              trailing={(
+                <Toggle
+                  checked={appSettings.launchAtLogin}
+                  onChange={(value) => updateAppSetting({ launchAtLogin: value })}
+                />
+              )}
+            />
+            <StaticRow
+              icon="desktop"
+              title="窗口透明度"
+              description="调整主窗口的透明效果"
+              trailing={(
+                <OpacitySlider
+                  value={appSettings.windowOpacity}
+                  onChange={(value) => updateAppSetting({ windowOpacity: value })}
+                />
+              )}
+            />
+          </div>
+        </Card>
       </div>
-
-      <RuleCard
-        title="逾期补排优先级"
-        description="智能补排会先挑最值得今天处理的任务。"
-        rows={[
-          { label: '第一优先级', value: '逾期时间越久越靠前' },
-          { label: '第二优先级', value: '早期复习阶段优先' },
-          { label: '第三优先级', value: '历史掌握越差越靠前' },
-          { label: '当前补排策略', value: backlogStrategy.label },
-          { label: '手动安排今日', value: '会固定在今天，不被自动重排挪走' },
-        ]}
-      />
     </div>
   )
 }
